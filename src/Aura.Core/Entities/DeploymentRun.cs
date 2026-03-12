@@ -1,0 +1,15 @@
+using Aura.Core.Enums;
+
+namespace Aura.Core.Entities;
+
+public class DeploymentRun : TenantScopedEntity
+{
+    public Guid DeploymentId { get; set; }
+    public Deployment Deployment { get; set; } = null!;
+    public RunStatus Status { get; set; } = RunStatus.Pending;
+    public string SnapshotJson { get; set; } = "{}";
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    public ICollection<DeploymentLayer> Layers { get; set; } = new List<DeploymentLayer>();
+}

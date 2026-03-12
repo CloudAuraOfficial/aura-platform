@@ -1,0 +1,28 @@
+## .NET
+bin/
+obj/
+publish/
+out/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+*.nupkg
+TestResults/
+
+## IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+
+## Environment
+.env
+appsettings.*.local.json
+docker-compose.override.yml
+
+## OS
+.DS_Store
+Thumbs.db
