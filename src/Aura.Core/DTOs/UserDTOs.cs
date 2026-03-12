@@ -11,6 +11,7 @@ public sealed record CreateUserRequest(
 
 public sealed record UpdateUserRequest(
     [EmailAddress, StringLength(256)] string? Email,
+    [StringLength(128, MinimumLength = 8)] string? Password,
     UserRole? Role,
     bool? IsDisabled
 );

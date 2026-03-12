@@ -120,6 +120,18 @@ public class UsersController : ControllerBase
             user.Email = request.Email;
         }
 
+        if (request.Password is not null)
+        {
+            var passwordError = AuthController.ValidatePasswordComplexity(request.Password);
+            if (passwordError is not null)
+                return BadRequest(new ErrorResponse("bad_request", passwordError, 400));
+
+            user.PasswordHash = AuthHelpers.HashPassword(request.Password);
+            // Revoke refresh token on password change
+            user.RefreshToken = null;
+            user.RefreshTokenExpiresAt = null;
+        }
+
         if (request.Role.HasValue)
             user.Role = request.Role.Value;
 
