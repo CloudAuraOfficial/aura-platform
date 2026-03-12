@@ -2,6 +2,7 @@ using System.Text;
 using Aura.Api.Services;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
+using Aura.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -47,6 +48,11 @@ builder.Services.AddAuthorization();
 // DI
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
+
+var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
+    ?? throw new InvalidOperationException("ENCRYPTION_KEY is required");
+builder.Services.AddSingleton<ICryptoService>(new AesCryptoService(encryptionKey));
+
 builder.Services.AddControllers();
 
 var app = builder.Build();
