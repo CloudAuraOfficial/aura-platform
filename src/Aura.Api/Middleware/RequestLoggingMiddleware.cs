@@ -24,6 +24,11 @@ public class RequestLoggingMiddleware
             await _next(context);
             sw.Stop();
 
+            AuraMetrics.HttpRequestsTotal
+                .WithLabels(context.Request.Method, context.Request.Path.Value ?? "/",
+                    context.Response.StatusCode.ToString())
+                .Inc();
+
             _logger.LogInformation(
                 "HTTP {Method} {Path} responded {StatusCode} in {ElapsedMs}ms [rid:{RequestId}]",
                 context.Request.Method,

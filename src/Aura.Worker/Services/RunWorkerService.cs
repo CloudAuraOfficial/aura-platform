@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
@@ -7,6 +8,7 @@ using Aura.Infrastructure.Services;
 using Aura.Worker.Executors;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Prometheus;
 
 namespace Aura.Worker.Services;
 
@@ -17,6 +19,20 @@ public class RunWorkerService : BackgroundService
     private readonly SemaphoreSlim _semaphore;
     private readonly int _pollIntervalSeconds;
     private readonly int _staleThresholdSeconds;
+
+    private static readonly Counter RunsCompleted = Metrics.CreateCounter(
+        "aura_runs_completed_total", "Completed runs by status",
+        new CounterConfiguration { LabelNames = new[] { "status" } });
+    private static readonly Counter LayersExecuted = Metrics.CreateCounter(
+        "aura_layers_executed_total", "Executed layers by type and status",
+        new CounterConfiguration { LabelNames = new[] { "executor_type", "status" } });
+    private static readonly Histogram RunDuration = Metrics.CreateHistogram(
+        "aura_run_duration_seconds", "Run duration",
+        new HistogramConfiguration { Buckets = Histogram.ExponentialBuckets(1, 2, 12) });
+    private static readonly Gauge QueueDepth = Metrics.CreateGauge(
+        "aura_queue_depth", "Queued runs count");
+    private static readonly Counter StaleReaped = Metrics.CreateCounter(
+        "aura_stale_runs_reaped_total", "Stale runs reaped");
 
     public RunWorkerService(IServiceScopeFactory scopeFactory, ILogger<RunWorkerService> logger)
     {
@@ -76,6 +92,8 @@ public class RunWorkerService : BackgroundService
             .Select(r => r.Id)
             .ToListAsync(ct);
 
+        QueueDepth.Set(queuedRuns.Count);
+
         if (queuedRuns.Count == 0)
             return;
 
@@ -119,6 +137,7 @@ public class RunWorkerService : BackgroundService
         run.Status = RunStatus.Running;
         run.StartedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
+        var runStopwatch = Stopwatch.StartNew();
 
         _logger.LogInformation("Processing run {RunId} with {LayerCount} layers", runId, run.Layers.Count);
         await PublishLogSafe(logStream, runId,
@@ -158,6 +177,7 @@ public class RunWorkerService : BackgroundService
                 layer.Output = TruncateOutput(result.Output);
                 layer.Status = result.Success ? LayerStatus.Succeeded : LayerStatus.Failed;
                 layer.CompletedAt = DateTime.UtcNow;
+                LayersExecuted.WithLabels(layer.ExecutorType.ToString(), layer.Status.ToString()).Inc();
 
                 // Stream output lines to subscribers
                 if (!string.IsNullOrEmpty(result.Output))
@@ -199,7 +219,12 @@ public class RunWorkerService : BackgroundService
         run.CompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Run {RunId} completed with status {Status}", runId, run.Status);
+        runStopwatch.Stop();
+        RunDuration.Observe(runStopwatch.Elapsed.TotalSeconds);
+        RunsCompleted.WithLabels(run.Status.ToString()).Inc();
+
+        _logger.LogInformation("Run {RunId} completed with status {Status} in {ElapsedMs}ms",
+            runId, run.Status, runStopwatch.ElapsedMilliseconds);
         await PublishLogSafe(logStream, runId,
             $"Run completed: {run.Status}", ct);
 
@@ -245,6 +270,7 @@ public class RunWorkerService : BackgroundService
             return;
 
         _logger.LogWarning("Reaping {Count} stale runs", staleRuns.Count);
+        StaleReaped.Inc(staleRuns.Count);
 
         foreach (var run in staleRuns)
         {

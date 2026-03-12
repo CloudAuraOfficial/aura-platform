@@ -5,6 +5,7 @@ using Aura.Core.Services;
 using Aura.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Prometheus;
 
 namespace Aura.Worker.Services;
 
@@ -18,6 +19,9 @@ public class DeploymentSchedulerService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DeploymentSchedulerService> _logger;
     private readonly int _pollIntervalSeconds;
+
+    private static readonly Counter ScheduledRuns = Metrics.CreateCounter(
+        "aura_scheduled_runs_total", "Cron-triggered runs created");
 
     public DeploymentSchedulerService(
         IServiceScopeFactory scopeFactory,
@@ -113,6 +117,7 @@ public class DeploymentSchedulerService : BackgroundService
             {
                 var run = await orchestration.CreateRunAsync(deployment, ct);
                 enqueued++;
+                ScheduledRuns.Inc();
                 _logger.LogInformation(
                     "Cron-triggered run {RunId} for deployment {DeploymentId} ({DeploymentName})",
                     run.Id, deployment.Id, deployment.Name);

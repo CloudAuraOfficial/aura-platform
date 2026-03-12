@@ -4,6 +4,7 @@ using Aura.Infrastructure.Services;
 using Aura.Worker.Executors;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
+using Prometheus;
 using StackExchange.Redis;
 
 var builder = Host.CreateDefaultBuilder(args);
@@ -57,4 +58,9 @@ builder.ConfigureServices((context, services) =>
 });
 
 var host = builder.Build();
+
+// Expose Prometheus metrics on port 9090 for scraping
+var metricsServer = new MetricServer(port: 9090);
+metricsServer.Start();
+
 await host.RunAsync();

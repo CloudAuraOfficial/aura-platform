@@ -105,6 +105,7 @@ public class AuthController : ControllerBase
                 user.FailedLoginAttempts = 0;
             }
             await _db.SaveChangesAsync();
+            Middleware.AuraMetrics.AuthAttemptsTotal.WithLabels("failed").Inc();
             return Unauthorized(new ErrorResponse("unauthorized", "Invalid email or password.", 401));
         }
 
@@ -116,6 +117,7 @@ public class AuthController : ControllerBase
         await _db.SaveChangesAsync();
 
         await _audit.LogAsync(user.TenantId, user.Id, "login", "User", user.Id);
+        Middleware.AuraMetrics.AuthAttemptsTotal.WithLabels("success").Inc();
 
         var token = AuthHelpers.GenerateJwt(
             user.Id, user.TenantId, user.Email, user.Role.ToString(),

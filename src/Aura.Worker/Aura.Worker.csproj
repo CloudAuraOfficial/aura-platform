@@ -11,6 +11,7 @@
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
+    <PackageReference Include="prometheus-net" Version="8.2.1" />
     <PackageReference Include="StackExchange.Redis" Version="2.7.33" />
   </ItemGroup>
   <ItemGroup>

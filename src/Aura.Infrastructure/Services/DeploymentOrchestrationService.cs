@@ -47,8 +47,9 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         await _db.SaveChangesAsync(ct);
 
         run.Layers = layers;
-        _logger.LogInformation("Created run {RunId} for deployment {DeploymentId} with {LayerCount} layers",
-            run.Id, deployment.Id, layers.Count);
+        _logger.LogInformation(
+            "Created run {RunId} for deployment {DeploymentId} with {LayerCount} layers, essence {EssenceId}, snapshot size {SnapshotSize} bytes",
+            run.Id, deployment.Id, layers.Count, deployment.EssenceId, snapshotJson.Length);
 
         return run;
     }
