@@ -7,3 +7,16 @@ public sealed record EssenceVersionResponse(
     Guid ChangedByUserId,
     DateTime CreatedAt
 );
+
+public sealed record EssenceDiffResponse(
+    int FromVersion,
+    int ToVersion,
+    List<EssenceDiffEntry> Changes
+);
+
+public sealed record EssenceDiffEntry(
+    string Path,
+    string ChangeType, // "added", "removed", "modified"
+    string? OldValue,
+    string? NewValue
+);

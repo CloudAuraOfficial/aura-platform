@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Aura.Api.Middleware;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
@@ -159,6 +160,94 @@ public class EssencesController : ControllerBase
         return Ok(new EssenceVersionResponse(
             version.Id, version.VersionNumber, version.EssenceJson,
             version.ChangedByUserId, version.CreatedAt));
+    }
+
+    [HttpGet("{id:guid}/versions/{v1:int}/diff/{v2:int}")]
+    public async Task<IActionResult> DiffVersions(Guid id, int v1, int v2)
+    {
+        var version1 = await _db.EssenceVersions
+            .FirstOrDefaultAsync(v => v.EssenceId == id && v.VersionNumber == v1);
+        var version2 = await _db.EssenceVersions
+            .FirstOrDefaultAsync(v => v.EssenceId == id && v.VersionNumber == v2);
+
+        if (version1 is null || version2 is null)
+            return NotFound(new ErrorResponse("not_found", "One or both versions not found.", 404));
+
+        var changes = ComputeJsonDiff(version1.EssenceJson, version2.EssenceJson, "");
+        return Ok(new EssenceDiffResponse(v1, v2, changes));
+    }
+
+    internal static List<EssenceDiffEntry> ComputeJsonDiff(string fromJson, string toJson, string prefix)
+    {
+        var changes = new List<EssenceDiffEntry>();
+        try
+        {
+            using var fromDoc = JsonDocument.Parse(fromJson);
+            using var toDoc = JsonDocument.Parse(toJson);
+            CompareElements(fromDoc.RootElement, toDoc.RootElement, prefix, changes);
+        }
+        catch (JsonException)
+        {
+            if (fromJson != toJson)
+                changes.Add(new EssenceDiffEntry(prefix.Length == 0 ? "$" : prefix, "modified", fromJson, toJson));
+        }
+        return changes;
+    }
+
+    private static void CompareElements(JsonElement from, JsonElement to, string path, List<EssenceDiffEntry> changes)
+    {
+        if (from.ValueKind != to.ValueKind)
+        {
+            changes.Add(new EssenceDiffEntry(path.Length == 0 ? "$" : path, "modified",
+                from.GetRawText(), to.GetRawText()));
+            return;
+        }
+
+        switch (from.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var fromProps = new HashSet<string>();
+                foreach (var prop in from.EnumerateObject())
+                {
+                    fromProps.Add(prop.Name);
+                    var childPath = string.IsNullOrEmpty(path) ? prop.Name : $"{path}.{prop.Name}";
+                    if (to.TryGetProperty(prop.Name, out var toProp))
+                        CompareElements(prop.Value, toProp, childPath, changes);
+                    else
+                        changes.Add(new EssenceDiffEntry(childPath, "removed", prop.Value.GetRawText(), null));
+                }
+                foreach (var prop in to.EnumerateObject())
+                {
+                    if (!fromProps.Contains(prop.Name))
+                    {
+                        var childPath = string.IsNullOrEmpty(path) ? prop.Name : $"{path}.{prop.Name}";
+                        changes.Add(new EssenceDiffEntry(childPath, "added", null, prop.Value.GetRawText()));
+                    }
+                }
+                break;
+
+            case JsonValueKind.Array:
+                var fromArr = from.EnumerateArray().ToList();
+                var toArr = to.EnumerateArray().ToList();
+                var maxLen = Math.Max(fromArr.Count, toArr.Count);
+                for (int i = 0; i < maxLen; i++)
+                {
+                    var itemPath = $"{path}[{i}]";
+                    if (i >= fromArr.Count)
+                        changes.Add(new EssenceDiffEntry(itemPath, "added", null, toArr[i].GetRawText()));
+                    else if (i >= toArr.Count)
+                        changes.Add(new EssenceDiffEntry(itemPath, "removed", fromArr[i].GetRawText(), null));
+                    else
+                        CompareElements(fromArr[i], toArr[i], itemPath, changes);
+                }
+                break;
+
+            default:
+                if (from.GetRawText() != to.GetRawText())
+                    changes.Add(new EssenceDiffEntry(path.Length == 0 ? "$" : path, "modified",
+                        from.GetRawText(), to.GetRawText()));
+                break;
+        }
     }
 
     [HttpPost("{id:guid}/clone")]
