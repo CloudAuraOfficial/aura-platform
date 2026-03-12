@@ -1,17 +1,19 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Aura.Core.DTOs;
 
 public sealed record CreateDeploymentRequest(
-    Guid EssenceId,
-    string Name,
-    string? CronExpression,
-    string? WebhookUrl,
+    [Required] Guid EssenceId,
+    [Required, StringLength(200, MinimumLength = 1)] string Name,
+    [StringLength(100)] string? CronExpression,
+    [Url, StringLength(2000)] string? WebhookUrl,
     bool IsEnabled = true
 );
 
 public sealed record UpdateDeploymentRequest(
-    string? Name,
-    string? CronExpression,
-    string? WebhookUrl,
+    [StringLength(200)] string? Name,
+    [StringLength(100)] string? CronExpression,
+    [Url, StringLength(2000)] string? WebhookUrl,
     bool? IsEnabled
 );
 

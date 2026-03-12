@@ -1,3 +1,4 @@
+using Aura.Api.Middleware;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
 using Aura.Core.Interfaces;
@@ -28,6 +29,7 @@ public class DeploymentsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] int offset = 0, [FromQuery] int limit = 25)
     {
+        (offset, limit) = PaginationDefaults.Clamp(offset, limit);
         var query = _db.Deployments.OrderBy(d => d.CreatedAt);
         var total = await query.CountAsync();
         var items = await query.Skip(offset).Take(limit)
@@ -122,6 +124,7 @@ public class DeploymentsController : ControllerBase
     public async Task<IActionResult> ListRuns(
         Guid id, [FromQuery] int offset = 0, [FromQuery] int limit = 25)
     {
+        (offset, limit) = PaginationDefaults.Clamp(offset, limit);
         var exists = await _db.Deployments.AnyAsync(d => d.Id == id);
         if (!exists)
             return NotFound(new ErrorResponse("not_found", "Deployment not found.", 404));

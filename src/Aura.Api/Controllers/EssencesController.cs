@@ -1,3 +1,4 @@
+using Aura.Api.Middleware;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
 using Aura.Core.Interfaces;
@@ -25,6 +26,7 @@ public class EssencesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] int offset = 0, [FromQuery] int limit = 25)
     {
+        (offset, limit) = PaginationDefaults.Clamp(offset, limit);
         var query = _db.Essences.OrderBy(e => e.CreatedAt);
         var total = await query.CountAsync();
         var items = await query.Skip(offset).Take(limit)

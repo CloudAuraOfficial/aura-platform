@@ -26,6 +26,7 @@ public class UsersController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] int offset = 0, [FromQuery] int limit = 25)
     {
+        (offset, limit) = PaginationDefaults.Clamp(offset, limit);
         var query = _db.Users.OrderBy(u => u.CreatedAt);
         var total = await query.CountAsync();
         var items = await query.Skip(offset).Take(limit)

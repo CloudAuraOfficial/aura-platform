@@ -1,10 +1,18 @@
+using System.ComponentModel.DataAnnotations;
 using Aura.Core.Enums;
 
 namespace Aura.Core.DTOs;
 
-public sealed record CreateUserRequest(string Email, string Password, UserRole Role = UserRole.Member);
+public sealed record CreateUserRequest(
+    [Required, EmailAddress, StringLength(256)] string Email,
+    [Required, StringLength(128, MinimumLength = 8)] string Password,
+    UserRole Role = UserRole.Member
+);
 
-public sealed record UpdateUserRequest(string? Email, UserRole? Role);
+public sealed record UpdateUserRequest(
+    [EmailAddress, StringLength(256)] string? Email,
+    UserRole? Role
+);
 
 public sealed record UserResponse(
     Guid Id,

@@ -1,9 +1,13 @@
 using System.Text;
+using System.Threading.RateLimiting;
+using Aura.Api.Middleware;
 using Aura.Api.Services;
+using Aura.Core.DTOs;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using StackExchange.Redis;
@@ -22,6 +26,9 @@ var jwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET")
     ?? throw new InvalidOperationException("JWT_SECRET is required");
 var jwtIssuer = Environment.GetEnvironmentVariable("JWT_ISSUER") ?? "aura-platform";
 var jwtAudience = Environment.GetEnvironmentVariable("JWT_AUDIENCE") ?? "aura-platform";
+
+var allowedOrigins = Environment.GetEnvironmentVariable("CORS_ORIGINS")?.Split(',', StringSplitOptions.RemoveEmptyEntries)
+    ?? [];
 
 // EF Core + PostgreSQL
 builder.Services.AddDbContext<AuraDbContext>((sp, options) =>
@@ -46,6 +53,52 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddAuthorization();
 
+// CORS
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        if (allowedOrigins.Length > 0)
+            policy.WithOrigins(allowedOrigins);
+        else
+            policy.AllowAnyOrigin();
+
+        policy.AllowAnyHeader().AllowAnyMethod();
+    });
+});
+
+// Rate limiting
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = 429;
+    options.OnRejected = async (context, ct) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+        var error = new ErrorResponse("rate_limited", "Too many requests. Try again later.", 429);
+        await context.HttpContext.Response.WriteAsJsonAsync(error, ct);
+    };
+
+    // Global: 100 requests per minute per IP
+    options.AddPolicy("global", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+
+    // Auth: 10 attempts per minute per IP
+    options.AddPolicy("auth", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+});
+
 // DI
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
@@ -66,11 +119,17 @@ builder.Services.AddControllers();
 
 var app = builder.Build();
 
-// Health endpoint
+// Middleware pipeline (order matters)
+app.UseMiddleware<ExceptionHandlerMiddleware>();
+app.UseMiddleware<RequestLoggingMiddleware>();
+app.UseRateLimiter();
+app.UseCors();
+
+// Health endpoint (no auth, no rate limit)
 app.MapGet("/health", () => Results.Ok(new { Status = "healthy", Timestamp = DateTime.UtcNow }));
 
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapControllers();
+app.MapControllers().RequireRateLimiting("global");
 
 app.Run();

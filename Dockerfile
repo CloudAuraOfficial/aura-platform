@@ -13,7 +13,7 @@ COPY . .
 
 # --- API target ---
 FROM build AS publish-api
-RUN dotnet publish src/Aura.Api/Aura.Api.csproj -c Release -o /app/api --no-restore
+RUN dotnet publish src/Aura.Api/Aura.Api.csproj -c Release -o /app/api
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS api
 RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
@@ -27,7 +27,7 @@ ENTRYPOINT ["dotnet", "Aura.Api.dll"]
 
 # --- Worker target ---
 FROM build AS publish-worker
-RUN dotnet publish src/Aura.Worker/Aura.Worker.csproj -c Release -o /app/worker --no-restore
+RUN dotnet publish src/Aura.Worker/Aura.Worker.csproj -c Release -o /app/worker
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS worker
 WORKDIR /app
