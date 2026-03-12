@@ -34,18 +34,43 @@ jobs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          timeout: 60s
-          script: |
-            cd ~/aura-platform
-            git pull origin main
-            docker compose build
-            docker compose up -d
-            sleep 5
-            curl -sf http://127.0.0.1:8006/health || echo "WARNING: health check failed after deploy"
+      - name: Trigger deploy via webhook
+        run: |
+          curl -sf -X POST \
+            "https://platform.cloudaura.cloud/api/internal/deploy" \
+            -H "Authorization: Bearer ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \
+            -H "Content-Type: application/json" \
+            -d '{"ref": "${{ github.sha }}"}' \
+            --max-time 120 \
+            || echo "WARNING: deploy webhook failed or timed out"
         continue-on-error: true
+
+  smoke-test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Wait for deploy to settle
+        run: sleep 30
+
+      - name: Health check
+        run: |
+          HTTP_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+            "https://platform.cloudaura.cloud/health" --max-time 10) || true
+          echo "Health check status: $HTTP_STATUS"
+          if [ "$HTTP_STATUS" != "200" ]; then
+            echo "WARNING: health check returned $HTTP_STATUS"
+          fi
+
+      - name: Login smoke test
+        run: |
+          HTTP_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+            -X POST "https://platform.cloudaura.cloud/api/v1/auth/login" \
+            -H "Content-Type: application/json" \
+            -d '{"email":"smoke@test.invalid","password":"NotARealPassword1!"}' \
+            --max-time 10) || true
+          echo "Login endpoint status: $HTTP_STATUS"
+          # 401 = endpoint is alive and rejecting invalid creds (expected)
+          if [ "$HTTP_STATUS" != "401" ]; then
+            echo "WARNING: expected 401, got $HTTP_STATUS"
+          fi
