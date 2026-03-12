@@ -4,6 +4,7 @@ using Aura.Infrastructure.Services;
 using Aura.Worker.Executors;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
+using StackExchange.Redis;
 
 var builder = Host.CreateDefaultBuilder(args);
 
@@ -36,6 +37,16 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<PowerShellExecutor>();
     services.AddTransient<PythonExecutor>();
     services.AddTransient<CSharpSdkExecutor>();
+
+    // Redis + log streaming
+    var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "localhost";
+    var redisPort = Environment.GetEnvironmentVariable("REDIS_PORT") ?? "6379";
+    services.AddSingleton<IConnectionMultiplexer>(
+        ConnectionMultiplexer.Connect($"{redisHost}:{redisPort},abortConnect=false"));
+    services.AddSingleton<ILogStreamService, RedisLogStreamService>();
+
+    // Orchestration (used by scheduler to create runs)
+    services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
 
     // Tenant context (worker uses unscoped / IgnoreQueryFilters)
     services.AddSingleton<ITenantContext, WorkerTenantContext>();

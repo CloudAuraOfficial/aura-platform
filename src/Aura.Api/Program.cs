@@ -6,6 +6,7 @@ using Aura.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -53,6 +54,13 @@ var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
     ?? throw new InvalidOperationException("ENCRYPTION_KEY is required");
 builder.Services.AddSingleton<ICryptoService>(new AesCryptoService(encryptionKey));
 builder.Services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
+
+// Redis
+var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "localhost";
+var redisPort = Environment.GetEnvironmentVariable("REDIS_PORT") ?? "6379";
+builder.Services.AddSingleton<IConnectionMultiplexer>(
+    ConnectionMultiplexer.Connect($"{redisHost}:{redisPort},abortConnect=false"));
+builder.Services.AddSingleton<ILogStreamService, RedisLogStreamService>();
 
 builder.Services.AddControllers();
 

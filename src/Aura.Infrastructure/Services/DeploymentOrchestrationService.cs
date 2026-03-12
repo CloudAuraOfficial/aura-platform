@@ -22,6 +22,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
     public async Task<DeploymentRun> CreateRunAsync(Deployment deployment, CancellationToken ct = default)
     {
         var essence = await _db.Essences
+            .IgnoreQueryFilters()
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == deployment.EssenceId, ct)
             ?? throw new InvalidOperationException($"Essence {deployment.EssenceId} not found.");

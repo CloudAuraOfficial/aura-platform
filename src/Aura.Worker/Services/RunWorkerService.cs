@@ -104,6 +104,7 @@ public class RunWorkerService : BackgroundService
         var db = scope.ServiceProvider.GetRequiredService<AuraDbContext>();
         var crypto = scope.ServiceProvider.GetRequiredService<ICryptoService>();
         var webhookService = scope.ServiceProvider.GetRequiredService<WebhookService>();
+        var logStream = scope.ServiceProvider.GetRequiredService<ILogStreamService>();
 
         var run = await db.DeploymentRuns
             .IgnoreQueryFilters()
@@ -120,6 +121,8 @@ public class RunWorkerService : BackgroundService
         await db.SaveChangesAsync(ct);
 
         _logger.LogInformation("Processing run {RunId} with {LayerCount} layers", runId, run.Layers.Count);
+        await PublishLogSafe(logStream, runId,
+            $"Run started with {run.Layers.Count} layer(s)", ct);
 
         // Decrypt BYOS credentials if cloud account is linked
         var envVars = await BuildEnvVarsAsync(db, crypto, run.SnapshotJson, ct);
@@ -132,12 +135,16 @@ public class RunWorkerService : BackgroundService
             {
                 layer.Status = LayerStatus.Skipped;
                 layer.CompletedAt = DateTime.UtcNow;
+                await PublishLogSafe(logStream, runId,
+                    $"[{layer.LayerName}] Skipped (previous layer failed)", ct);
                 continue;
             }
 
             layer.Status = LayerStatus.Running;
             layer.StartedAt = DateTime.UtcNow;
             await db.SaveChangesAsync(ct);
+            await PublishLogSafe(logStream, runId,
+                $"[{layer.LayerName}] Running ({layer.ExecutorType})", ct);
 
             var executor = ResolveExecutor(scope.ServiceProvider, layer.ExecutorType);
             try
@@ -152,14 +159,26 @@ public class RunWorkerService : BackgroundService
                 layer.Status = result.Success ? LayerStatus.Succeeded : LayerStatus.Failed;
                 layer.CompletedAt = DateTime.UtcNow;
 
+                // Stream output lines to subscribers
+                if (!string.IsNullOrEmpty(result.Output))
+                {
+                    foreach (var line in result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                        await PublishLogSafe(logStream, runId,
+                            $"[{layer.LayerName}] {line}", ct);
+                }
+
                 if (!result.Success)
                 {
                     failed = true;
                     _logger.LogWarning("Layer {Layer} failed in run {RunId}", layer.LayerName, runId);
+                    await PublishLogSafe(logStream, runId,
+                        $"[{layer.LayerName}] FAILED", ct);
                 }
                 else
                 {
                     _logger.LogInformation("Layer {Layer} succeeded in run {RunId}", layer.LayerName, runId);
+                    await PublishLogSafe(logStream, runId,
+                        $"[{layer.LayerName}] Succeeded", ct);
                 }
             }
             catch (Exception ex)
@@ -169,6 +188,8 @@ public class RunWorkerService : BackgroundService
                 layer.CompletedAt = DateTime.UtcNow;
                 failed = true;
                 _logger.LogError(ex, "Layer {Layer} threw in run {RunId}", layer.LayerName, runId);
+                await PublishLogSafe(logStream, runId,
+                    $"[{layer.LayerName}] Exception: {ex.Message}", ct);
             }
 
             await db.SaveChangesAsync(ct);
@@ -179,11 +200,32 @@ public class RunWorkerService : BackgroundService
         await db.SaveChangesAsync(ct);
 
         _logger.LogInformation("Run {RunId} completed with status {Status}", runId, run.Status);
+        await PublishLogSafe(logStream, runId,
+            $"Run completed: {run.Status}", ct);
+
+        // Signal stream end so SSE clients know to disconnect
+        await PublishLogSafe(logStream, runId,
+            Infrastructure.Services.RedisLogStreamService.StreamEndSentinel, ct);
 
         // Webhook callback
         if (!string.IsNullOrEmpty(run.Deployment?.WebhookUrl))
         {
             await webhookService.NotifyAsync(run.Deployment.WebhookUrl, run.Id, run.Status.ToString(), ct);
+        }
+    }
+
+    /// <summary>
+    /// Best-effort log publishing — never lets a Redis failure break run execution.
+    /// </summary>
+    private async Task PublishLogSafe(ILogStreamService logStream, Guid runId, string message, CancellationToken ct)
+    {
+        try
+        {
+            await logStream.PublishAsync(runId, message, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to publish log for run {RunId}", runId);
         }
     }
 
