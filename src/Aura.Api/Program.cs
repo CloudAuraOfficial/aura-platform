@@ -52,6 +52,7 @@ builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
 var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
     ?? throw new InvalidOperationException("ENCRYPTION_KEY is required");
 builder.Services.AddSingleton<ICryptoService>(new AesCryptoService(encryptionKey));
+builder.Services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
 
 builder.Services.AddControllers();
 

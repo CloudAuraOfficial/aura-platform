@@ -15,11 +15,14 @@ public class DeploymentsController : ControllerBase
 {
     private readonly AuraDbContext _db;
     private readonly ITenantContext _tenant;
+    private readonly IDeploymentOrchestrationService _orchestration;
 
-    public DeploymentsController(AuraDbContext db, ITenantContext tenant)
+    public DeploymentsController(
+        AuraDbContext db, ITenantContext tenant, IDeploymentOrchestrationService orchestration)
     {
         _db = db;
         _tenant = tenant;
+        _orchestration = orchestration;
     }
 
     [HttpGet]
@@ -101,6 +104,79 @@ public class DeploymentsController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{id:guid}/runs")]
+    public async Task<IActionResult> CreateRun(Guid id)
+    {
+        var deployment = await _db.Deployments.FindAsync(id);
+        if (deployment is null)
+            return NotFound(new ErrorResponse("not_found", "Deployment not found.", 404));
+
+        if (!deployment.IsEnabled)
+            return BadRequest(new ErrorResponse("bad_request", "Deployment is disabled.", 400));
+
+        var run = await _orchestration.CreateRunAsync(deployment);
+        return CreatedAtAction(nameof(GetRun), new { id, runId = run.Id }, ToRunDto(run));
+    }
+
+    [HttpGet("{id:guid}/runs")]
+    public async Task<IActionResult> ListRuns(
+        Guid id, [FromQuery] int offset = 0, [FromQuery] int limit = 25)
+    {
+        var exists = await _db.Deployments.AnyAsync(d => d.Id == id);
+        if (!exists)
+            return NotFound(new ErrorResponse("not_found", "Deployment not found.", 404));
+
+        var query = _db.DeploymentRuns
+            .Where(r => r.DeploymentId == id)
+            .OrderByDescending(r => r.CreatedAt);
+
+        var total = await query.CountAsync();
+        var items = await query.Skip(offset).Take(limit)
+            .Include(r => r.Layers.OrderBy(l => l.SortOrder))
+            .ToListAsync();
+
+        return Ok(new PaginatedResponse<DeploymentRunResponse>(
+            items.Select(ToRunDto).ToList(), total, offset, limit));
+    }
+
+    [HttpGet("{id:guid}/runs/{runId:guid}")]
+    public async Task<IActionResult> GetRun(Guid id, Guid runId)
+    {
+        var run = await _db.DeploymentRuns
+            .Include(r => r.Layers.OrderBy(l => l.SortOrder))
+            .FirstOrDefaultAsync(r => r.Id == runId && r.DeploymentId == id);
+
+        if (run is null)
+            return NotFound(new ErrorResponse("not_found", "Run not found.", 404));
+
+        return Ok(ToRunDto(run));
+    }
+
+    [HttpGet("{id:guid}/runs/{runId:guid}/layers")]
+    public async Task<IActionResult> ListLayers(Guid id, Guid runId)
+    {
+        var run = await _db.DeploymentRuns.AnyAsync(r => r.Id == runId && r.DeploymentId == id);
+        if (!run)
+            return NotFound(new ErrorResponse("not_found", "Run not found.", 404));
+
+        var layers = await _db.DeploymentLayers
+            .Where(l => l.RunId == runId)
+            .OrderBy(l => l.SortOrder)
+            .ToListAsync();
+
+        return Ok(layers.Select(ToLayerDto).ToList());
+    }
+
     private static DeploymentResponse ToDto(Deployment d) =>
         new(d.Id, d.EssenceId, d.Name, d.CronExpression, d.WebhookUrl, d.IsEnabled, d.CreatedAt);
+
+    private static DeploymentRunResponse ToRunDto(DeploymentRun r) =>
+        new(r.Id, r.DeploymentId, r.Status.ToString(), r.SnapshotJson,
+            r.Layers.OrderBy(l => l.SortOrder).Select(ToLayerDto).ToList(),
+            r.StartedAt, r.CompletedAt, r.CreatedAt);
+
+    private static DeploymentLayerResponse ToLayerDto(DeploymentLayer l) =>
+        new(l.Id, l.LayerName, l.ExecutorType.ToString(), l.Status.ToString(),
+            l.Parameters, l.ScriptPath, l.DependsOn, l.SortOrder,
+            l.Output, l.StartedAt, l.CompletedAt);
 }
