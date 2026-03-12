@@ -1,5 +1,7 @@
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
+using Aura.Infrastructure.Services;
+using Aura.Worker.Executors;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,7 +21,27 @@ builder.ConfigureServices((context, services) =>
         options.UseNpgsql(connectionString);
     });
 
+    // Crypto
+    var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
+        ?? throw new InvalidOperationException("ENCRYPTION_KEY is required");
+    services.AddSingleton<ICryptoService>(new AesCryptoService(encryptionKey));
+
+    // Webhook
+    services.AddHttpClient<WebhookService>(client =>
+    {
+        client.Timeout = TimeSpan.FromSeconds(30);
+    });
+
+    // Executors
+    services.AddTransient<PowerShellExecutor>();
+    services.AddTransient<PythonExecutor>();
+    services.AddTransient<CSharpSdkExecutor>();
+
+    // Tenant context (worker uses unscoped / IgnoreQueryFilters)
     services.AddSingleton<ITenantContext, WorkerTenantContext>();
+
+    // Background services
+    services.AddHostedService<RunWorkerService>();
     services.AddHostedService<DeploymentSchedulerService>();
 });
 
