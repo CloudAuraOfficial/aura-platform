@@ -1,0 +1,41 @@
+@page "/dashboard/audit"
+@{
+    ViewData["Title"] = "Audit Log";
+    Layout = "/Pages/Shared/_Layout.cshtml";
+}
+
+<h1>Audit Log</h1>
+<div id="content"><div class="empty">Loading...</div></div>
+
+<script>
+const token = localStorage.getItem('aura_token');
+if (!token) window.location.href = '/dashboard/login';
+
+async function api(path) {
+    const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token } });
+    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    if (res.status === 403) return { items: [], total: 0, error: 'forbidden' };
+    return await res.json();
+}
+
+(async () => {
+    const data = await api('/api/v1/audit-log?limit=50');
+    if (data?.error === 'forbidden') {
+        document.getElementById('content').innerHTML = '<div class="alert alert-error">Admin access required</div>';
+        return;
+    }
+    if (!data || data.items.length === 0) {
+        document.getElementById('content').innerHTML = '<div class="empty">No audit entries</div>';
+        return;
+    }
+    document.getElementById('content').innerHTML = `<table><thead><tr>
+        <th>Time</th><th>Action</th><th>Entity</th><th>Detail</th><th>User ID</th>
+    </tr></thead><tbody>${data.items.map(e => `<tr>
+        <td>${new Date(e.createdAt).toLocaleString()}</td>
+        <td><span class="badge badge-info">${e.action}</span></td>
+        <td>${e.entityType}${e.entityId ? ' / ' + e.entityId.substring(0,8) : ''}</td>
+        <td>${e.detail || '-'}</td>
+        <td>${e.userId.substring(0,8)}</td>
+    </tr>`).join('')}</tbody></table>`;
+})();
+</script>

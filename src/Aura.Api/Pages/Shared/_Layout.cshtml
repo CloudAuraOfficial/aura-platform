@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>@ViewData["Title"] - Aura Platform</title>
+    <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+    <nav class="nav">
+        <div class="nav-brand">Aura Platform</div>
+        <div class="nav-links">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/dashboard/essences">Essences</a>
+            <a href="/dashboard/deployments">Deployments</a>
+            <a href="/dashboard/users">Users</a>
+            <a href="/dashboard/audit">Audit Log</a>
+            <a href="/dashboard/login" class="nav-logout">Login</a>
+        </div>
+    </nav>
+    <main class="content">
+        @RenderBody()
+    </main>
+    <footer class="footer">
+        <small>Aura Platform &copy; @DateTime.UtcNow.Year</small>
+    </footer>
+</body>
+</html>

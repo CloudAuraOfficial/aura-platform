@@ -1,0 +1,40 @@
+@page "/dashboard/users"
+@{
+    ViewData["Title"] = "Users";
+    Layout = "/Pages/Shared/_Layout.cshtml";
+}
+
+<h1>Users</h1>
+<div id="content"><div class="empty">Loading...</div></div>
+
+<script>
+const token = localStorage.getItem('aura_token');
+if (!token) window.location.href = '/dashboard/login';
+
+async function api(path) {
+    const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token } });
+    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    if (res.status === 403) return { items: [], total: 0, error: 'forbidden' };
+    return await res.json();
+}
+
+(async () => {
+    const data = await api('/api/v1/users?limit=100');
+    if (data?.error === 'forbidden') {
+        document.getElementById('content').innerHTML = '<div class="alert alert-error">Admin access required</div>';
+        return;
+    }
+    if (!data || data.items.length === 0) {
+        document.getElementById('content').innerHTML = '<div class="empty">No users</div>';
+        return;
+    }
+    document.getElementById('content').innerHTML = `<table><thead><tr>
+        <th>Email</th><th>Role</th><th>Status</th><th>Created</th>
+    </tr></thead><tbody>${data.items.map(u => `<tr>
+        <td>${u.email}</td>
+        <td><span class="badge badge-info">${u.role}</span></td>
+        <td>${u.isDisabled ? '<span class="badge badge-danger">disabled</span>' : '<span class="badge badge-success">active</span>'}</td>
+        <td>${new Date(u.createdAt).toLocaleDateString()}</td>
+    </tr>`).join('')}</tbody></table>`;
+})();
+</script>

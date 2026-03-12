@@ -1,0 +1,35 @@
+@page "/dashboard/essences"
+@{
+    ViewData["Title"] = "Essences";
+    Layout = "/Pages/Shared/_Layout.cshtml";
+}
+
+<h1>Essences</h1>
+<div id="content"><div class="empty">Loading...</div></div>
+
+<script>
+const token = localStorage.getItem('aura_token');
+if (!token) window.location.href = '/dashboard/login';
+
+async function api(path) {
+    const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token } });
+    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    return await res.json();
+}
+
+(async () => {
+    const data = await api('/api/v1/essences?limit=100');
+    if (!data || data.items.length === 0) {
+        document.getElementById('content').innerHTML = '<div class="empty">No essences</div>';
+        return;
+    }
+    document.getElementById('content').innerHTML = `<table><thead><tr>
+        <th>Name</th><th>Version</th><th>Cloud Account</th><th>Created</th>
+    </tr></thead><tbody>${data.items.map(e => `<tr>
+        <td><a href="/dashboard/essences/${e.id}" style="color:var(--accent)">${e.name}</a></td>
+        <td>v${e.currentVersion}</td>
+        <td>${e.cloudAccountId}</td>
+        <td>${new Date(e.createdAt).toLocaleDateString()}</td>
+    </tr>`).join('')}</tbody></table>`;
+})();
+</script>

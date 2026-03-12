@@ -116,6 +116,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(
 builder.Services.AddSingleton<ILogStreamService, RedisLogStreamService>();
 
 builder.Services.AddControllers();
+builder.Services.AddRazorPages();
 
 var app = builder.Build();
 
@@ -171,8 +172,10 @@ app.MapPost("/api/internal/deploy", (HttpContext ctx) =>
 app.UseHttpMetrics();
 app.MapMetrics("/metrics");
 
+app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers().RequireRateLimiting("global");
+app.MapRazorPages();
 
 app.Run();

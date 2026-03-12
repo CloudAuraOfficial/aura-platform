@@ -1,0 +1,52 @@
+@page "/dashboard/deployments"
+@{
+    ViewData["Title"] = "Deployments";
+    Layout = "/Pages/Shared/_Layout.cshtml";
+}
+
+<h1>Deployments</h1>
+<div id="content"><div class="empty">Loading...</div></div>
+
+<script>
+const token = localStorage.getItem('aura_token');
+if (!token) window.location.href = '/dashboard/login';
+
+async function api(path, opts) {
+    const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, ...opts });
+    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    return await res.json();
+}
+
+function badge(status) {
+    const map = { Succeeded: 'success', Failed: 'danger', Running: 'warning', Queued: 'info', Cancelled: 'muted', Pending: 'muted' };
+    return `<span class="badge badge-${map[status] || 'muted'}">${status}</span>`;
+}
+
+async function triggerRun(deploymentId) {
+    const data = await api(`/api/v1/deployments/${deploymentId}/runs`, { method: 'POST' });
+    if (data) { alert('Run created: ' + data.id); location.reload(); }
+}
+
+(async () => {
+    const data = await api('/api/v1/deployments?limit=100');
+    if (!data || data.items.length === 0) {
+        document.getElementById('content').innerHTML = '<div class="empty">No deployments</div>';
+        return;
+    }
+
+    let html = '<table><thead><tr><th>Name</th><th>Cron</th><th>Enabled</th><th>Latest Run</th><th>Actions</th></tr></thead><tbody>';
+    for (const d of data.items) {
+        const runs = await api(`/api/v1/deployments/${d.id}/runs?limit=1`);
+        const latest = runs?.items?.[0];
+        html += `<tr>
+            <td>${d.name}</td>
+            <td><code>${d.cronExpression || 'manual'}</code></td>
+            <td>${d.isEnabled ? '<span class="badge badge-success">on</span>' : '<span class="badge badge-muted">off</span>'}</td>
+            <td>${latest ? badge(latest.status) + ' ' + new Date(latest.createdAt).toLocaleString() : '-'}</td>
+            <td><button class="btn btn-primary" onclick="triggerRun('${d.id}')" ${d.isEnabled ? '' : 'disabled'}>Run</button></td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    document.getElementById('content').innerHTML = html;
+})();
+</script>
