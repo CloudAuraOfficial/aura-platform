@@ -16,12 +16,13 @@ FROM build AS publish-api
 RUN dotnet publish src/Aura.Api/Aura.Api.csproj -c Release -o /app/api --no-restore
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS api
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=publish-api /app/api .
 ENV ASPNETCORE_URLS=http://+:8000
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD ["dotnet", "Aura.Api.dll", "--urls", "http://localhost:8000/health"] || exit 1
+  CMD curl -sf http://localhost:8000/health || exit 1
 ENTRYPOINT ["dotnet", "Aura.Api.dll"]
 
 # --- Worker target ---
