@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Prometheus;
 using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -78,7 +79,6 @@ builder.Services.AddRateLimiter(options =>
         await context.HttpContext.Response.WriteAsJsonAsync(error, ct);
     };
 
-    // Global: 100 requests per minute per IP
     options.AddPolicy("global", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -88,7 +88,6 @@ builder.Services.AddRateLimiter(options =>
                 Window = TimeSpan.FromMinutes(1)
             }));
 
-    // Auth: 10 attempts per minute per IP
     options.AddPolicy("auth", context =>
         RateLimitPartition.GetFixedWindowLimiter(
             context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -102,6 +101,7 @@ builder.Services.AddRateLimiter(options =>
 // DI
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ITenantContext, HttpTenantContext>();
+builder.Services.AddScoped<IAuditService, AuditService>();
 
 var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
     ?? throw new InvalidOperationException("ENCRYPTION_KEY is required");
@@ -119,14 +119,18 @@ builder.Services.AddControllers();
 
 var app = builder.Build();
 
-// Middleware pipeline (order matters)
+// Middleware pipeline
 app.UseMiddleware<ExceptionHandlerMiddleware>();
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseRateLimiter();
 app.UseCors();
 
-// Health endpoint (no auth, no rate limit)
+// Health endpoint
 app.MapGet("/health", () => Results.Ok(new { Status = "healthy", Timestamp = DateTime.UtcNow }));
+
+// Prometheus metrics endpoint
+app.UseHttpMetrics();
+app.MapMetrics("/metrics");
 
 app.UseAuthentication();
 app.UseAuthorization();
