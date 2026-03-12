@@ -4,32 +4,198 @@
     Layout = "/Pages/Shared/_Layout.cshtml";
 }
 
-<h1>Essences</h1>
+<div class="toolbar">
+    <h1>Essences</h1>
+    <button class="btn btn-primary" onclick="openCreate()">+ New Essence</button>
+</div>
 <div id="content"><div class="empty">Loading...</div></div>
+
+<!-- Create / Edit Modal -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <h2 id="modalTitle">New Essence</h2>
+        <div id="modalError" class="alert alert-error" style="display:none"></div>
+        <form id="essenceForm" onsubmit="return saveEssence(event)">
+            <input type="hidden" id="editId" />
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="fName" required maxlength="200" />
+            </div>
+            <div class="form-group">
+                <label>Cloud Account</label>
+                <select id="fAccount" required></select>
+            </div>
+            <div class="form-group">
+                <label>Essence JSON</label>
+                <textarea id="fJson" required></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Clone Modal -->
+<div class="modal-overlay" id="cloneModal">
+    <div class="modal">
+        <h2>Clone Essence</h2>
+        <div id="cloneError" class="alert alert-error" style="display:none"></div>
+        <form onsubmit="return doClone(event)">
+            <input type="hidden" id="cloneId" />
+            <div class="form-group">
+                <label>New Name</label>
+                <input type="text" id="cloneName" required maxlength="200" />
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('cloneModal').classList.remove('open')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Clone</button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <script>
 const token = localStorage.getItem('aura_token');
 if (!token) window.location.href = '/dashboard/login';
 
-async function api(path) {
-    const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token } });
+let accounts = [];
+
+async function api(path, opts = {}) {
+    const res = await fetch(path, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        ...opts
+    });
     if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    if (res.status === 204) return {};
     return await res.json();
 }
 
-(async () => {
+function toast(msg, type = 'success') {
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+function openCreate() {
+    document.getElementById('modalTitle').textContent = 'New Essence';
+    document.getElementById('saveBtn').textContent = 'Create';
+    document.getElementById('editId').value = '';
+    document.getElementById('fName').value = '';
+    document.getElementById('fJson').value = '{"layers":{}}';
+    document.getElementById('modalError').style.display = 'none';
+    loadAccounts();
+    document.getElementById('modal').classList.add('open');
+}
+
+function openEdit(e) {
+    document.getElementById('modalTitle').textContent = 'Edit Essence';
+    document.getElementById('saveBtn').textContent = 'Save';
+    document.getElementById('editId').value = e.id;
+    document.getElementById('fName').value = e.name;
+    document.getElementById('fJson').value = typeof e.essenceJson === 'string' ? e.essenceJson : JSON.stringify(e.essenceJson, null, 2);
+    document.getElementById('modalError').style.display = 'none';
+    loadAccounts(e.cloudAccountId);
+    document.getElementById('modal').classList.add('open');
+}
+
+async function loadAccounts(selected) {
+    if (accounts.length === 0) {
+        const data = await api('/api/v1/cloud-accounts?limit=100');
+        if (data?.items) accounts = data.items;
+    }
+    const sel = document.getElementById('fAccount');
+    sel.innerHTML = accounts.map(a =>
+        `<option value="${a.id}" ${a.id === selected ? 'selected' : ''}>${a.label} (${a.provider})</option>`
+    ).join('');
+}
+
+async function saveEssence(e) {
+    e.preventDefault();
+    const id = document.getElementById('editId').value;
+    const body = {
+        name: document.getElementById('fName').value,
+        cloudAccountId: document.getElementById('fAccount').value,
+        essenceJson: document.getElementById('fJson').value
+    };
+    try {
+        JSON.parse(body.essenceJson);
+    } catch {
+        document.getElementById('modalError').textContent = 'Invalid JSON';
+        document.getElementById('modalError').style.display = 'block';
+        return false;
+    }
+    const res = id
+        ? await api(`/api/v1/essences/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api('/api/v1/essences', { method: 'POST', body: JSON.stringify(body) });
+    if (res?.error) {
+        document.getElementById('modalError').textContent = res.message;
+        document.getElementById('modalError').style.display = 'block';
+        return false;
+    }
+    closeModal();
+    toast(id ? 'Essence updated' : 'Essence created');
+    loadEssences();
+    return false;
+}
+
+function openClone(id, name) {
+    document.getElementById('cloneId').value = id;
+    document.getElementById('cloneName').value = name + ' (copy)';
+    document.getElementById('cloneError').style.display = 'none';
+    document.getElementById('cloneModal').classList.add('open');
+}
+
+async function doClone(e) {
+    e.preventDefault();
+    const id = document.getElementById('cloneId').value;
+    const res = await api(`/api/v1/essences/${id}/clone`, {
+        method: 'POST',
+        body: JSON.stringify({ name: document.getElementById('cloneName').value })
+    });
+    if (res?.error) {
+        document.getElementById('cloneError').textContent = res.message;
+        document.getElementById('cloneError').style.display = 'block';
+        return false;
+    }
+    document.getElementById('cloneModal').classList.remove('open');
+    toast('Essence cloned');
+    loadEssences();
+    return false;
+}
+
+async function deleteEssence(id, name) {
+    if (!confirm(`Delete essence "${name}"?`)) return;
+    await api(`/api/v1/essences/${id}`, { method: 'DELETE' });
+    toast('Essence deleted');
+    loadEssences();
+}
+
+async function loadEssences() {
     const data = await api('/api/v1/essences?limit=100');
     if (!data || data.items.length === 0) {
-        document.getElementById('content').innerHTML = '<div class="empty">No essences</div>';
+        document.getElementById('content').innerHTML = '<div class="empty">No essences yet. Create your first one!</div>';
         return;
     }
     document.getElementById('content').innerHTML = `<table><thead><tr>
-        <th>Name</th><th>Version</th><th>Cloud Account</th><th>Created</th>
+        <th>Name</th><th>Version</th><th>Cloud Account</th><th>Created</th><th>Actions</th>
     </tr></thead><tbody>${data.items.map(e => `<tr>
-        <td><a href="/dashboard/essences/${e.id}" style="color:var(--accent)">${e.name}</a></td>
+        <td>${e.name}</td>
         <td>v${e.currentVersion}</td>
-        <td>${e.cloudAccountId}</td>
+        <td>${e.cloudAccountId.substring(0,8)}...</td>
         <td>${new Date(e.createdAt).toLocaleDateString()}</td>
+        <td class="actions">
+            <button class="btn btn-primary btn-sm" onclick='openEdit(${JSON.stringify(e)})'>Edit</button>
+            <button class="btn btn-secondary btn-sm" onclick="openClone('${e.id}','${e.name.replace(/'/g,"\\'")}')">Clone</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteEssence('${e.id}','${e.name.replace(/'/g,"\\'")}')">Delete</button>
+        </td>
     </tr>`).join('')}</tbody></table>`;
-})();
+}
+
+loadEssences();
 </script>

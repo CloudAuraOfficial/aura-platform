@@ -4,21 +4,204 @@
     Layout = "/Pages/Shared/_Layout.cshtml";
 }
 
-<h1>Users</h1>
+<div class="toolbar">
+    <h1>Users</h1>
+    <div class="actions">
+        <button class="btn btn-secondary" onclick="openInvite()">Invite</button>
+        <button class="btn btn-primary" onclick="openCreate()">+ Create User</button>
+    </div>
+</div>
 <div id="content"><div class="empty">Loading...</div></div>
+
+<!-- Create / Edit Modal -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <h2 id="modalTitle">Create User</h2>
+        <div id="modalError" class="alert alert-error" style="display:none"></div>
+        <form onsubmit="return saveUser(event)">
+            <input type="hidden" id="editId" />
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="fEmail" required maxlength="256" />
+            </div>
+            <div class="form-group" id="pwGroup">
+                <label id="pwLabel">Password</label>
+                <input type="password" id="fPassword" minlength="8" maxlength="128" />
+            </div>
+            <div class="form-group">
+                <label>Role</label>
+                <select id="fRole">
+                    <option value="Admin">Admin</option>
+                    <option value="Member" selected>Member</option>
+                    <option value="Operator">Operator</option>
+                </select>
+            </div>
+            <div class="form-group" id="disabledGroup" style="display:none">
+                <label><input type="checkbox" id="fDisabled" /> Disabled</label>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Invite Modal -->
+<div class="modal-overlay" id="inviteModal">
+    <div class="modal">
+        <h2>Invite User</h2>
+        <div id="inviteError" class="alert alert-error" style="display:none"></div>
+        <div id="inviteSuccess" class="alert alert-success" style="display:none"></div>
+        <form onsubmit="return sendInvite(event)" id="inviteForm">
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="invEmail" required maxlength="256" />
+            </div>
+            <div class="form-group">
+                <label>Role</label>
+                <select id="invRole">
+                    <option value="Member" selected>Member</option>
+                    <option value="Operator">Operator</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('inviteModal').classList.remove('open')">Close</button>
+                <button type="submit" class="btn btn-primary">Send Invite</button>
+            </div>
+        </form>
+        <div id="inviteResult" style="display:none; margin-top:1rem;">
+            <label style="font-size:0.8rem; color:var(--muted)">Invite Token (share with user):</label>
+            <pre id="inviteToken" style="word-break:break-all; margin-top:0.25rem"></pre>
+        </div>
+    </div>
+</div>
 
 <script>
 const token = localStorage.getItem('aura_token');
 if (!token) window.location.href = '/dashboard/login';
 
-async function api(path) {
-    const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token } });
+async function api(path, opts = {}) {
+    const res = await fetch(path, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        ...opts
+    });
     if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
-    if (res.status === 403) return { items: [], total: 0, error: 'forbidden' };
+    if (res.status === 403) return { error: 'forbidden', message: 'Admin access required' };
+    if (res.status === 204) return {};
     return await res.json();
 }
 
-(async () => {
+function toast(msg, type = 'success') {
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+function openCreate() {
+    document.getElementById('modalTitle').textContent = 'Create User';
+    document.getElementById('saveBtn').textContent = 'Create';
+    document.getElementById('editId').value = '';
+    document.getElementById('fEmail').value = '';
+    document.getElementById('fPassword').value = '';
+    document.getElementById('fPassword').required = true;
+    document.getElementById('pwLabel').textContent = 'Password';
+    document.getElementById('fRole').value = 'Member';
+    document.getElementById('disabledGroup').style.display = 'none';
+    document.getElementById('modalError').style.display = 'none';
+    document.getElementById('modal').classList.add('open');
+}
+
+function openEdit(u) {
+    document.getElementById('modalTitle').textContent = 'Edit User';
+    document.getElementById('saveBtn').textContent = 'Save';
+    document.getElementById('editId').value = u.id;
+    document.getElementById('fEmail').value = u.email;
+    document.getElementById('fPassword').value = '';
+    document.getElementById('fPassword').required = false;
+    document.getElementById('pwLabel').textContent = 'New Password (leave empty to keep)';
+    document.getElementById('fRole').value = u.role;
+    document.getElementById('fDisabled').checked = u.isDisabled;
+    document.getElementById('disabledGroup').style.display = 'block';
+    document.getElementById('modalError').style.display = 'none';
+    document.getElementById('modal').classList.add('open');
+}
+
+async function saveUser(e) {
+    e.preventDefault();
+    const id = document.getElementById('editId').value;
+    const errEl = document.getElementById('modalError');
+    if (id) {
+        const body = {
+            email: document.getElementById('fEmail').value,
+            role: document.getElementById('fRole').value,
+            isDisabled: document.getElementById('fDisabled').checked
+        };
+        const pw = document.getElementById('fPassword').value;
+        if (pw) body.password = pw;
+        const res = await api(`/api/v1/users/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+        if (res?.error) { errEl.textContent = res.message; errEl.style.display = 'block'; return false; }
+        toast('User updated');
+    } else {
+        const body = {
+            email: document.getElementById('fEmail').value,
+            password: document.getElementById('fPassword').value,
+            role: document.getElementById('fRole').value
+        };
+        const res = await api('/api/v1/users', { method: 'POST', body: JSON.stringify(body) });
+        if (res?.error) { errEl.textContent = res.message; errEl.style.display = 'block'; return false; }
+        toast('User created');
+    }
+    closeModal();
+    loadUsers();
+    return false;
+}
+
+async function deleteUser(id, email) {
+    if (!confirm(`Delete user "${email}"?`)) return;
+    await api(`/api/v1/users/${id}`, { method: 'DELETE' });
+    toast('User deleted');
+    loadUsers();
+}
+
+function openInvite() {
+    document.getElementById('invEmail').value = '';
+    document.getElementById('invRole').value = 'Member';
+    document.getElementById('inviteError').style.display = 'none';
+    document.getElementById('inviteSuccess').style.display = 'none';
+    document.getElementById('inviteResult').style.display = 'none';
+    document.getElementById('inviteForm').style.display = 'block';
+    document.getElementById('inviteModal').classList.add('open');
+}
+
+async function sendInvite(e) {
+    e.preventDefault();
+    const res = await api('/api/v1/users/invite', {
+        method: 'POST',
+        body: JSON.stringify({
+            email: document.getElementById('invEmail').value,
+            role: document.getElementById('invRole').value
+        })
+    });
+    if (res?.error) {
+        document.getElementById('inviteError').textContent = res.message;
+        document.getElementById('inviteError').style.display = 'block';
+        return false;
+    }
+    document.getElementById('inviteForm').style.display = 'none';
+    document.getElementById('inviteToken').textContent = res.inviteToken;
+    document.getElementById('inviteResult').style.display = 'block';
+    document.getElementById('inviteSuccess').textContent = `Invite sent! Expires ${new Date(res.expiresAt).toLocaleString()}`;
+    document.getElementById('inviteSuccess').style.display = 'block';
+    loadUsers();
+    return false;
+}
+
+async function loadUsers() {
     const data = await api('/api/v1/users?limit=100');
     if (data?.error === 'forbidden') {
         document.getElementById('content').innerHTML = '<div class="alert alert-error">Admin access required</div>';
@@ -29,12 +212,18 @@ async function api(path) {
         return;
     }
     document.getElementById('content').innerHTML = `<table><thead><tr>
-        <th>Email</th><th>Role</th><th>Status</th><th>Created</th>
+        <th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th>
     </tr></thead><tbody>${data.items.map(u => `<tr>
         <td>${u.email}</td>
         <td><span class="badge badge-info">${u.role}</span></td>
         <td>${u.isDisabled ? '<span class="badge badge-danger">disabled</span>' : '<span class="badge badge-success">active</span>'}</td>
         <td>${new Date(u.createdAt).toLocaleDateString()}</td>
+        <td class="actions">
+            <button class="btn btn-secondary btn-sm" onclick='openEdit(${JSON.stringify(u)})'>Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${u.email.replace(/'/g,"\\'")}')">Delete</button>
+        </td>
     </tr>`).join('')}</tbody></table>`;
-})();
+}
+
+loadUsers();
 </script>

@@ -1,0 +1,159 @@
+@page "/dashboard/cloud-accounts"
+@{
+    ViewData["Title"] = "Cloud Accounts";
+    Layout = "/Pages/Shared/_Layout.cshtml";
+}
+
+<div class="toolbar">
+    <h1>Cloud Accounts</h1>
+    <button class="btn btn-primary" onclick="openCreate()">+ New Account</button>
+</div>
+<div id="content"><div class="empty">Loading...</div></div>
+
+<!-- Create / Edit Modal -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <h2 id="modalTitle">New Cloud Account</h2>
+        <div id="modalError" class="alert alert-error" style="display:none"></div>
+        <form onsubmit="return saveAccount(event)">
+            <input type="hidden" id="editId" />
+            <div class="form-group" id="providerGroup">
+                <label>Provider</label>
+                <select id="fProvider" required>
+                    <option value="Azure">Azure</option>
+                    <option value="Aws">AWS</option>
+                    <option value="Gcp">GCP</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Label</label>
+                <input type="text" id="fLabel" required maxlength="200" />
+            </div>
+            <div class="form-group">
+                <label id="credLabel">Credentials (JSON)</label>
+                <textarea id="fCredentials" required></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+const token = localStorage.getItem('aura_token');
+if (!token) window.location.href = '/dashboard/login';
+
+async function api(path, opts = {}) {
+    const res = await fetch(path, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        ...opts
+    });
+    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    if (res.status === 403) return { error: 'forbidden', message: 'Access denied' };
+    if (res.status === 204) return {};
+    return await res.json();
+}
+
+function toast(msg, type = 'success') {
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+function openCreate() {
+    document.getElementById('modalTitle').textContent = 'New Cloud Account';
+    document.getElementById('saveBtn').textContent = 'Create';
+    document.getElementById('editId').value = '';
+    document.getElementById('fProvider').disabled = false;
+    document.getElementById('fProvider').value = 'Azure';
+    document.getElementById('fLabel').value = '';
+    document.getElementById('fCredentials').value = '';
+    document.getElementById('fCredentials').required = true;
+    document.getElementById('credLabel').textContent = 'Credentials (JSON)';
+    document.getElementById('modalError').style.display = 'none';
+    document.getElementById('modal').classList.add('open');
+}
+
+function openEdit(a) {
+    document.getElementById('modalTitle').textContent = 'Edit Cloud Account';
+    document.getElementById('saveBtn').textContent = 'Save';
+    document.getElementById('editId').value = a.id;
+    document.getElementById('fProvider').value = a.provider;
+    document.getElementById('fProvider').disabled = true;
+    document.getElementById('fLabel').value = a.label;
+    document.getElementById('fCredentials').value = '';
+    document.getElementById('fCredentials').required = false;
+    document.getElementById('credLabel').textContent = 'Credentials (leave empty to keep current)';
+    document.getElementById('modalError').style.display = 'none';
+    document.getElementById('modal').classList.add('open');
+}
+
+async function saveAccount(e) {
+    e.preventDefault();
+    const id = document.getElementById('editId').value;
+    const errEl = document.getElementById('modalError');
+    if (id) {
+        const body = { label: document.getElementById('fLabel').value };
+        const creds = document.getElementById('fCredentials').value;
+        if (creds) body.credentials = creds;
+        const res = await api(`/api/v1/cloud-accounts/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+        if (res?.error) { errEl.textContent = res.message; errEl.style.display = 'block'; return false; }
+        toast('Account updated');
+    } else {
+        const body = {
+            provider: document.getElementById('fProvider').value,
+            label: document.getElementById('fLabel').value,
+            credentials: document.getElementById('fCredentials').value
+        };
+        const res = await api('/api/v1/cloud-accounts', { method: 'POST', body: JSON.stringify(body) });
+        if (res?.error) { errEl.textContent = res.message; errEl.style.display = 'block'; return false; }
+        toast('Account created');
+    }
+    closeModal();
+    loadAccounts();
+    return false;
+}
+
+async function deleteAccount(id, label) {
+    if (!confirm(`Delete cloud account "${label}"? Essences linked to this account will be affected.`)) return;
+    await api(`/api/v1/cloud-accounts/${id}`, { method: 'DELETE' });
+    toast('Account deleted');
+    loadAccounts();
+}
+
+function providerBadge(p) {
+    const colors = { Azure: 'info', Aws: 'warning', Gcp: 'success' };
+    return `<span class="badge badge-${colors[p] || 'muted'}">${p}</span>`;
+}
+
+async function loadAccounts() {
+    const data = await api('/api/v1/cloud-accounts?limit=100');
+    if (data?.error === 'forbidden') {
+        document.getElementById('content').innerHTML = '<div class="alert alert-error">Access denied</div>';
+        return;
+    }
+    if (!data || data.items.length === 0) {
+        document.getElementById('content').innerHTML = '<div class="empty">No cloud accounts yet. Add your first one!</div>';
+        return;
+    }
+    document.getElementById('content').innerHTML = `<table><thead><tr>
+        <th>Label</th><th>Provider</th><th>Created</th><th>Actions</th>
+    </tr></thead><tbody>${data.items.map(a => `<tr>
+        <td>${a.label}</td>
+        <td>${providerBadge(a.provider)}</td>
+        <td>${new Date(a.createdAt).toLocaleDateString()}</td>
+        <td class="actions">
+            <button class="btn btn-secondary btn-sm" onclick='openEdit(${JSON.stringify(a)})'>Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteAccount('${a.id}','${a.label.replace(/'/g,"\\'")}')">Delete</button>
+        </td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+loadAccounts();
+</script>

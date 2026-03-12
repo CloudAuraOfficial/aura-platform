@@ -4,17 +4,81 @@
     Layout = "/Pages/Shared/_Layout.cshtml";
 }
 
-<h1>Deployments</h1>
+<div class="toolbar">
+    <h1>Deployments</h1>
+    <button class="btn btn-primary" onclick="openCreate()">+ New Deployment</button>
+</div>
 <div id="content"><div class="empty">Loading...</div></div>
+
+<!-- Create / Edit Modal -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <h2 id="modalTitle">New Deployment</h2>
+        <div id="modalError" class="alert alert-error" style="display:none"></div>
+        <form onsubmit="return saveDeployment(event)">
+            <input type="hidden" id="editId" />
+            <div class="form-group" id="essenceGroup">
+                <label>Essence</label>
+                <select id="fEssence" required></select>
+            </div>
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="fName" required maxlength="200" />
+            </div>
+            <div class="form-group">
+                <label>Cron Expression (optional)</label>
+                <input type="text" id="fCron" maxlength="100" placeholder="e.g. 0 */6 * * *" />
+            </div>
+            <div class="form-group">
+                <label>Webhook URL (optional)</label>
+                <input type="url" id="fWebhook" maxlength="2000" placeholder="https://..." />
+            </div>
+            <div class="form-group">
+                <label><input type="checkbox" id="fEnabled" checked /> Enabled</label>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Run Detail Modal -->
+<div class="modal-overlay" id="runModal">
+    <div class="modal" style="max-width:700px">
+        <h2>Run Details</h2>
+        <div id="runContent"><div class="empty">Loading...</div></div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('runModal').classList.remove('open')">Close</button>
+            <button type="button" class="btn btn-danger" id="cancelRunBtn" style="display:none" onclick="cancelRun()">Cancel Run</button>
+        </div>
+    </div>
+</div>
 
 <script>
 const token = localStorage.getItem('aura_token');
 if (!token) window.location.href = '/dashboard/login';
 
-async function api(path, opts) {
-    const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, ...opts });
+let essences = [];
+let currentRunDeployId, currentRunId;
+
+async function api(path, opts = {}) {
+    const res = await fetch(path, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        ...opts
+    });
     if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    if (res.status === 204) return {};
     return await res.json();
+}
+
+function toast(msg, type = 'success') {
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
 }
 
 function badge(status) {
@@ -22,31 +86,145 @@ function badge(status) {
     return `<span class="badge badge-${map[status] || 'muted'}">${status}</span>`;
 }
 
-async function triggerRun(deploymentId) {
-    const data = await api(`/api/v1/deployments/${deploymentId}/runs`, { method: 'POST' });
-    if (data) { alert('Run created: ' + data.id); location.reload(); }
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+async function loadEssences(selected) {
+    if (essences.length === 0) {
+        const data = await api('/api/v1/essences?limit=100');
+        if (data?.items) essences = data.items;
+    }
+    document.getElementById('fEssence').innerHTML = essences.map(e =>
+        `<option value="${e.id}" ${e.id === selected ? 'selected' : ''}>${e.name} (v${e.currentVersion})</option>`
+    ).join('');
 }
 
-(async () => {
+function openCreate() {
+    document.getElementById('modalTitle').textContent = 'New Deployment';
+    document.getElementById('saveBtn').textContent = 'Create';
+    document.getElementById('editId').value = '';
+    document.getElementById('fName').value = '';
+    document.getElementById('fCron').value = '';
+    document.getElementById('fWebhook').value = '';
+    document.getElementById('fEnabled').checked = true;
+    document.getElementById('essenceGroup').style.display = 'block';
+    document.getElementById('modalError').style.display = 'none';
+    loadEssences();
+    document.getElementById('modal').classList.add('open');
+}
+
+function openEdit(d) {
+    document.getElementById('modalTitle').textContent = 'Edit Deployment';
+    document.getElementById('saveBtn').textContent = 'Save';
+    document.getElementById('editId').value = d.id;
+    document.getElementById('fName').value = d.name;
+    document.getElementById('fCron').value = d.cronExpression || '';
+    document.getElementById('fWebhook').value = d.webhookUrl || '';
+    document.getElementById('fEnabled').checked = d.isEnabled;
+    document.getElementById('essenceGroup').style.display = 'none'; // Can't change essence on edit
+    document.getElementById('modalError').style.display = 'none';
+    document.getElementById('modal').classList.add('open');
+}
+
+async function saveDeployment(e) {
+    e.preventDefault();
+    const id = document.getElementById('editId').value;
+    const body = {
+        name: document.getElementById('fName').value,
+        cronExpression: document.getElementById('fCron').value || null,
+        webhookUrl: document.getElementById('fWebhook').value || null,
+        isEnabled: document.getElementById('fEnabled').checked
+    };
+    if (!id) body.essenceId = document.getElementById('fEssence').value;
+    const res = id
+        ? await api(`/api/v1/deployments/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+        : await api('/api/v1/deployments', { method: 'POST', body: JSON.stringify(body) });
+    if (res?.error) {
+        document.getElementById('modalError').textContent = res.message;
+        document.getElementById('modalError').style.display = 'block';
+        return false;
+    }
+    closeModal();
+    toast(id ? 'Deployment updated' : 'Deployment created');
+    loadDeployments();
+    return false;
+}
+
+async function deleteDeployment(id, name) {
+    if (!confirm(`Delete deployment "${name}"?`)) return;
+    await api(`/api/v1/deployments/${id}`, { method: 'DELETE' });
+    toast('Deployment deleted');
+    loadDeployments();
+}
+
+async function triggerRun(deploymentId) {
+    const data = await api(`/api/v1/deployments/${deploymentId}/runs`, { method: 'POST' });
+    if (data) { toast('Run triggered'); loadDeployments(); }
+}
+
+async function viewRuns(deploymentId) {
+    currentRunDeployId = deploymentId;
+    const data = await api(`/api/v1/deployments/${deploymentId}/runs?limit=20`);
+    if (!data?.items?.length) {
+        document.getElementById('runContent').innerHTML = '<div class="empty">No runs</div>';
+    } else {
+        document.getElementById('runContent').innerHTML = `<table><thead><tr>
+            <th>Status</th><th>Started</th><th>Completed</th><th>Layers</th><th>Actions</th>
+        </tr></thead><tbody>${data.items.map(r => {
+            const started = r.startedAt ? new Date(r.startedAt).toLocaleString() : '-';
+            const completed = r.completedAt ? new Date(r.completedAt).toLocaleString() : '-';
+            const canCancel = r.status === 'Queued' || r.status === 'Running';
+            return `<tr>
+                <td>${badge(r.status)}</td><td>${started}</td><td>${completed}</td>
+                <td>${r.layers?.length || '-'}</td>
+                <td>${canCancel ? `<button class="btn btn-danger btn-sm" onclick="cancelRunDirect('${deploymentId}','${r.id}')">Cancel</button>` : ''}</td>
+            </tr>`;
+        }).join('')}</tbody></table>`;
+    }
+    document.getElementById('cancelRunBtn').style.display = 'none';
+    document.getElementById('runModal').classList.add('open');
+}
+
+async function cancelRunDirect(deploymentId, runId) {
+    if (!confirm('Cancel this run?')) return;
+    await api(`/api/v1/deployments/${deploymentId}/runs/${runId}/cancel`, { method: 'POST' });
+    toast('Run cancelled');
+    viewRuns(deploymentId);
+}
+
+async function loadDeployments() {
     const data = await api('/api/v1/deployments?limit=100');
     if (!data || data.items.length === 0) {
-        document.getElementById('content').innerHTML = '<div class="empty">No deployments</div>';
+        document.getElementById('content').innerHTML = '<div class="empty">No deployments yet. Create your first one!</div>';
         return;
     }
 
-    let html = '<table><thead><tr><th>Name</th><th>Cron</th><th>Enabled</th><th>Latest Run</th><th>Actions</th></tr></thead><tbody>';
+    let html = '<table><thead><tr><th>Name</th><th>Essence</th><th>Cron</th><th>Enabled</th><th>Latest Run</th><th>Actions</th></tr></thead><tbody>';
     for (const d of data.items) {
         const runs = await api(`/api/v1/deployments/${d.id}/runs?limit=1`);
         const latest = runs?.items?.[0];
+        const essName = essences.find(e => e.id === d.essenceId)?.name || d.essenceId.substring(0,8);
         html += `<tr>
             <td>${d.name}</td>
+            <td>${essName}</td>
             <td><code>${d.cronExpression || 'manual'}</code></td>
             <td>${d.isEnabled ? '<span class="badge badge-success">on</span>' : '<span class="badge badge-muted">off</span>'}</td>
             <td>${latest ? badge(latest.status) + ' ' + new Date(latest.createdAt).toLocaleString() : '-'}</td>
-            <td><button class="btn btn-primary" onclick="triggerRun('${d.id}')" ${d.isEnabled ? '' : 'disabled'}>Run</button></td>
+            <td class="actions">
+                <button class="btn btn-primary btn-sm" onclick="triggerRun('${d.id}')">Run</button>
+                <button class="btn btn-secondary btn-sm" onclick="viewRuns('${d.id}')">Runs</button>
+                <button class="btn btn-secondary btn-sm" onclick='openEdit(${JSON.stringify(d)})'>Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteDeployment('${d.id}','${d.name.replace(/'/g,"\\'")}')">Delete</button>
+            </td>
         </tr>`;
     }
     html += '</tbody></table>';
     document.getElementById('content').innerHTML = html;
+}
+
+// Preload essences then load deployments
+(async () => {
+    const data = await api('/api/v1/essences?limit=100');
+    if (data?.items) essences = data.items;
+    loadDeployments();
 })();
 </script>
