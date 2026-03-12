@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Aura.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Roles = "Admin,Member,Operator")]
 [Route("api/v1/deployments")]
 public class DeploymentsController : ControllerBase
 {
@@ -50,6 +50,7 @@ public class DeploymentsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin,Member")]
     public async Task<IActionResult> Create([FromBody] CreateDeploymentRequest request)
     {
         var essenceExists = await _db.Essences.AnyAsync(e => e.Id == request.EssenceId);
@@ -73,6 +74,7 @@ public class DeploymentsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = "Admin,Member")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateDeploymentRequest request)
     {
         var deployment = await _db.Deployments.FindAsync(id);
@@ -96,6 +98,7 @@ public class DeploymentsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "Admin,Member")]
     public async Task<IActionResult> Delete(Guid id)
     {
         var deployment = await _db.Deployments.FindAsync(id);

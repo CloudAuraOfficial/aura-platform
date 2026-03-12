@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Aura.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Roles = "Admin,Member")]
 [Route("api/v1/cloud-accounts")]
 public class CloudAccountsController : ControllerBase
 {

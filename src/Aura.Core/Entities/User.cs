@@ -12,4 +12,6 @@ public class User : TenantScopedEntity
     public DateTime? LockedUntil { get; set; }
     public string? RefreshToken { get; set; }
     public DateTime? RefreshTokenExpiresAt { get; set; }
+    public string? InviteToken { get; set; }
+    public DateTime? InviteTokenExpiresAt { get; set; }
 }

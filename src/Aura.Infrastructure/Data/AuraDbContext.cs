@@ -49,6 +49,7 @@ public class AuraDbContext : DbContext
         modelBuilder.Entity<User>(b =>
         {
             b.HasIndex(u => new { u.TenantId, u.Email }).IsUnique();
+            b.HasIndex(u => u.InviteToken).IsUnique().HasFilter("\"InviteToken\" IS NOT NULL");
             b.Property(u => u.Role).HasConversion<string>();
         });
 

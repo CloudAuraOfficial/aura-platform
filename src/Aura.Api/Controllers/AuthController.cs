@@ -148,6 +148,40 @@ public class AuthController : ControllerBase
         return Ok(new LoginResponse(token, user.RefreshToken, DateTime.UtcNow.AddMinutes(_jwtExpiryMinutes)));
     }
 
+    [HttpPost("accept-invite")]
+    public async Task<IActionResult> AcceptInvite([FromBody] AcceptInviteRequest request)
+    {
+        var user = await _db.Users.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(u => u.InviteToken == request.InviteToken);
+
+        if (user is null)
+            return BadRequest(new ErrorResponse("bad_request", "Invalid invite token.", 400));
+
+        if (user.InviteTokenExpiresAt < DateTime.UtcNow)
+            return BadRequest(new ErrorResponse("bad_request", "Invite token has expired.", 400));
+
+        var passwordError = ValidatePasswordComplexity(request.Password);
+        if (passwordError is not null)
+            return BadRequest(new ErrorResponse("bad_request", passwordError, 400));
+
+        user.PasswordHash = AuthHelpers.HashPassword(request.Password);
+        user.IsDisabled = false;
+        user.InviteToken = null;
+        user.InviteTokenExpiresAt = null;
+        user.RefreshToken = GenerateRefreshToken();
+        user.RefreshTokenExpiresAt = DateTime.UtcNow.AddDays(RefreshTokenDays);
+
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(user.TenantId, user.Id, "accept-invite", "User", user.Id);
+
+        var token = AuthHelpers.GenerateJwt(
+            user.Id, user.TenantId, user.Email, user.Role.ToString(),
+            _jwtSecret, _jwtIssuer, _jwtAudience, _jwtExpiryMinutes);
+
+        return Ok(new LoginResponse(token, user.RefreshToken!, DateTime.UtcNow.AddMinutes(_jwtExpiryMinutes)));
+    }
+
     internal static string? ValidatePasswordComplexity(string password)
     {
         if (password.Length < 8)

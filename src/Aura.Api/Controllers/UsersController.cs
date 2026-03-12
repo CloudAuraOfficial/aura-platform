@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Aura.Api.Middleware;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
@@ -75,6 +76,35 @@ public class UsersController : ControllerBase
         return CreatedAtAction(nameof(Get), new { id = user.Id }, ToDto(user));
     }
 
+    [HttpPost("invite")]
+    public async Task<IActionResult> Invite([FromBody] InviteUserRequest request)
+    {
+        var exists = await _db.Users.AnyAsync(u => u.Email == request.Email);
+        if (exists)
+            return Conflict(new ErrorResponse("conflict", "Email already in use.", 409));
+
+        var inviteToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+
+        var user = new User
+        {
+            TenantId = _tenant.TenantId,
+            Email = request.Email,
+            PasswordHash = string.Empty, // No password yet — must accept invite
+            Role = request.Role,
+            IsDisabled = true, // Disabled until invite is accepted
+            InviteToken = inviteToken,
+            InviteTokenExpiresAt = DateTime.UtcNow.AddDays(7)
+        };
+
+        _db.Users.Add(user);
+        await _db.SaveChangesAsync();
+
+        var callerId = GetCurrentUserId();
+        await _audit.LogAsync(_tenant.TenantId, callerId, "invite", "User", user.Id, $"role={request.Role}");
+
+        return Ok(new { user.Id, InviteToken = inviteToken, ExpiresAt = user.InviteTokenExpiresAt });
+    }
+
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateUserRequest request)
     {
@@ -94,7 +124,15 @@ public class UsersController : ControllerBase
             user.Role = request.Role.Value;
 
         if (request.IsDisabled.HasValue)
+        {
             user.IsDisabled = request.IsDisabled.Value;
+            // Revoke refresh token when disabling a user
+            if (request.IsDisabled.Value)
+            {
+                user.RefreshToken = null;
+                user.RefreshTokenExpiresAt = null;
+            }
+        }
 
         await _db.SaveChangesAsync();
 

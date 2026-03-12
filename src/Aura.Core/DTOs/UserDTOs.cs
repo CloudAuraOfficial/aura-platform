@@ -15,6 +15,16 @@ public sealed record UpdateUserRequest(
     bool? IsDisabled
 );
 
+public sealed record InviteUserRequest(
+    [Required, EmailAddress, StringLength(256)] string Email,
+    UserRole Role = UserRole.Member
+);
+
+public sealed record AcceptInviteRequest(
+    [Required] string InviteToken,
+    [Required, StringLength(128, MinimumLength = 8)] string Password
+);
+
 public sealed record UserResponse(
     Guid Id,
     string Email,

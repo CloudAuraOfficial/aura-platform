@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace Aura.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Roles = "Admin,Member,Operator")]
 [Route("api/v1/essences")]
 public class EssencesController : ControllerBase
 {
@@ -48,6 +48,7 @@ public class EssencesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin,Member")]
     public async Task<IActionResult> Create([FromBody] CreateEssenceRequest request)
     {
         var accountExists = await _db.CloudAccounts.AnyAsync(c => c.Id == request.CloudAccountId);
@@ -82,6 +83,7 @@ public class EssencesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Roles = "Admin,Member")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateEssenceRequest request)
     {
         var essence = await _db.Essences.FindAsync(id);
@@ -160,6 +162,7 @@ public class EssencesController : ControllerBase
     }
 
     [HttpPost("{id:guid}/clone")]
+    [Authorize(Roles = "Admin,Member")]
     public async Task<IActionResult> Clone(Guid id, [FromBody] CloneEssenceRequest request)
     {
         var source = await _db.Essences.FindAsync(id);
@@ -194,6 +197,7 @@ public class EssencesController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
+    [Authorize(Roles = "Admin,Member")]
     public async Task<IActionResult> Delete(Guid id)
     {
         var essence = await _db.Essences.FindAsync(id);
