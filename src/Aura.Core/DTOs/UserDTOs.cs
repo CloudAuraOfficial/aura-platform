@@ -11,12 +11,14 @@ public sealed record CreateUserRequest(
 
 public sealed record UpdateUserRequest(
     [EmailAddress, StringLength(256)] string? Email,
-    UserRole? Role
+    UserRole? Role,
+    bool? IsDisabled
 );
 
 public sealed record UserResponse(
     Guid Id,
     string Email,
     string Role,
+    bool IsDisabled,
     DateTime CreatedAt
 );

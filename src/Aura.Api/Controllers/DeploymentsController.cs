@@ -1,6 +1,7 @@
 using Aura.Api.Middleware;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
+using Aura.Core.Enums;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -152,6 +153,35 @@ public class DeploymentsController : ControllerBase
         if (run is null)
             return NotFound(new ErrorResponse("not_found", "Run not found.", 404));
 
+        return Ok(ToRunDto(run));
+    }
+
+    [HttpPost("{id:guid}/runs/{runId:guid}/cancel")]
+    public async Task<IActionResult> CancelRun(Guid id, Guid runId)
+    {
+        var run = await _db.DeploymentRuns
+            .Include(r => r.Layers)
+            .FirstOrDefaultAsync(r => r.Id == runId && r.DeploymentId == id);
+
+        if (run is null)
+            return NotFound(new ErrorResponse("not_found", "Run not found.", 404));
+
+        if (run.Status != RunStatus.Queued && run.Status != RunStatus.Running)
+            return BadRequest(new ErrorResponse("bad_request",
+                $"Cannot cancel a run with status '{run.Status}'.", 400));
+
+        run.Status = RunStatus.Cancelled;
+        run.CompletedAt = DateTime.UtcNow;
+
+        foreach (var layer in run.Layers.Where(l =>
+            l.Status == LayerStatus.Pending || l.Status == LayerStatus.Running))
+        {
+            layer.Status = LayerStatus.Skipped;
+            layer.Output = "Cancelled by user.";
+            layer.CompletedAt = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
         return Ok(ToRunDto(run));
     }
 

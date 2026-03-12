@@ -10,17 +10,19 @@ using Microsoft.EntityFrameworkCore;
 namespace Aura.Api.Controllers;
 
 [ApiController]
-[Authorize]
+[Authorize(Roles = "Admin")]
 [Route("api/v1/users")]
 public class UsersController : ControllerBase
 {
     private readonly AuraDbContext _db;
     private readonly ITenantContext _tenant;
+    private readonly IAuditService _audit;
 
-    public UsersController(AuraDbContext db, ITenantContext tenant)
+    public UsersController(AuraDbContext db, ITenantContext tenant, IAuditService audit)
     {
         _db = db;
         _tenant = tenant;
+        _audit = audit;
     }
 
     [HttpGet]
@@ -48,6 +50,10 @@ public class UsersController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateUserRequest request)
     {
+        var passwordError = AuthController.ValidatePasswordComplexity(request.Password);
+        if (passwordError is not null)
+            return BadRequest(new ErrorResponse("bad_request", passwordError, 400));
+
         var exists = await _db.Users.AnyAsync(u => u.Email == request.Email);
         if (exists)
             return Conflict(new ErrorResponse("conflict", "Email already in use.", 409));
@@ -62,6 +68,9 @@ public class UsersController : ControllerBase
 
         _db.Users.Add(user);
         await _db.SaveChangesAsync();
+
+        var callerId = GetCurrentUserId();
+        await _audit.LogAsync(_tenant.TenantId, callerId, "create", "User", user.Id, $"role={user.Role}");
 
         return CreatedAtAction(nameof(Get), new { id = user.Id }, ToDto(user));
     }
@@ -84,7 +93,14 @@ public class UsersController : ControllerBase
         if (request.Role.HasValue)
             user.Role = request.Role.Value;
 
+        if (request.IsDisabled.HasValue)
+            user.IsDisabled = request.IsDisabled.Value;
+
         await _db.SaveChangesAsync();
+
+        var callerId = GetCurrentUserId();
+        await _audit.LogAsync(_tenant.TenantId, callerId, "update", "User", user.Id);
+
         return Ok(ToDto(user));
     }
 
@@ -97,9 +113,20 @@ public class UsersController : ControllerBase
 
         _db.Users.Remove(user);
         await _db.SaveChangesAsync();
+
+        var callerId = GetCurrentUserId();
+        await _audit.LogAsync(_tenant.TenantId, callerId, "delete", "User", id);
+
         return NoContent();
     }
 
+    private Guid GetCurrentUserId()
+    {
+        var sub = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("sub");
+        return sub is not null ? Guid.Parse(sub.Value) : Guid.Empty;
+    }
+
     private static UserResponse ToDto(User u) =>
-        new(u.Id, u.Email, u.Role.ToString(), u.CreatedAt);
+        new(u.Id, u.Email, u.Role.ToString(), u.IsDisabled, u.CreatedAt);
 }

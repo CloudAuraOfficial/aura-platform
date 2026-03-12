@@ -27,6 +27,8 @@ public class AuraDbContext : DbContext
     public DbSet<Deployment> Deployments => Set<Deployment>();
     public DbSet<DeploymentRun> DeploymentRuns => Set<DeploymentRun>();
     public DbSet<DeploymentLayer> DeploymentLayers => Set<DeploymentLayer>();
+    public DbSet<AuditLogEntry> AuditLog => Set<AuditLogEntry>();
+    public DbSet<EssenceVersion> EssenceVersions => Set<EssenceVersion>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -67,6 +69,20 @@ public class AuraDbContext : DbContext
         {
             b.Property(r => r.SnapshotJson).HasColumnType("jsonb");
             b.Property(r => r.Status).HasConversion<string>();
+        });
+
+        // AuditLogEntry
+        modelBuilder.Entity<AuditLogEntry>(b =>
+        {
+            b.HasIndex(a => new { a.TenantId, a.CreatedAt });
+            b.HasIndex(a => new { a.TenantId, a.EntityType, a.EntityId });
+        });
+
+        // EssenceVersion
+        modelBuilder.Entity<EssenceVersion>(b =>
+        {
+            b.Property(v => v.EssenceJson).HasColumnType("jsonb");
+            b.HasIndex(v => new { v.EssenceId, v.VersionNumber }).IsUnique();
         });
 
         // DeploymentLayer

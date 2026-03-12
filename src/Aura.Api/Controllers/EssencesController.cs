@@ -16,11 +16,13 @@ public class EssencesController : ControllerBase
 {
     private readonly AuraDbContext _db;
     private readonly ITenantContext _tenant;
+    private readonly IAuditService _audit;
 
-    public EssencesController(AuraDbContext db, ITenantContext tenant)
+    public EssencesController(AuraDbContext db, ITenantContext tenant, IAuditService audit)
     {
         _db = db;
         _tenant = tenant;
+        _audit = audit;
     }
 
     [HttpGet]
@@ -57,11 +59,24 @@ public class EssencesController : ControllerBase
             TenantId = _tenant.TenantId,
             Name = request.Name,
             CloudAccountId = request.CloudAccountId,
-            EssenceJson = request.EssenceJson
+            EssenceJson = request.EssenceJson,
+            CurrentVersion = 1
         };
 
         _db.Essences.Add(essence);
+
+        // Save initial version
+        _db.EssenceVersions.Add(new EssenceVersion
+        {
+            EssenceId = essence.Id,
+            VersionNumber = 1,
+            EssenceJson = request.EssenceJson,
+            ChangedByUserId = GetCurrentUserId()
+        });
+
         await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(_tenant.TenantId, GetCurrentUserId(), "create", "Essence", essence.Id);
 
         return CreatedAtAction(nameof(Get), new { id = essence.Id }, ToDto(essence));
     }
@@ -85,12 +100,63 @@ public class EssencesController : ControllerBase
         }
 
         if (request.EssenceJson is not null)
+        {
             essence.EssenceJson = request.EssenceJson;
+            essence.CurrentVersion++;
+
+            _db.EssenceVersions.Add(new EssenceVersion
+            {
+                EssenceId = essence.Id,
+                VersionNumber = essence.CurrentVersion,
+                EssenceJson = request.EssenceJson,
+                ChangedByUserId = GetCurrentUserId()
+            });
+        }
 
         essence.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
+        await _audit.LogAsync(_tenant.TenantId, GetCurrentUserId(), "update", "Essence", essence.Id,
+            $"v{essence.CurrentVersion}");
+
         return Ok(ToDto(essence));
+    }
+
+    [HttpGet("{id:guid}/versions")]
+    public async Task<IActionResult> ListVersions(Guid id,
+        [FromQuery] int offset = 0, [FromQuery] int limit = 25)
+    {
+        (offset, limit) = PaginationDefaults.Clamp(offset, limit);
+
+        var exists = await _db.Essences.AnyAsync(e => e.Id == id);
+        if (!exists)
+            return NotFound(new ErrorResponse("not_found", "Essence not found.", 404));
+
+        var query = _db.EssenceVersions
+            .Where(v => v.EssenceId == id)
+            .OrderByDescending(v => v.VersionNumber);
+
+        var total = await query.CountAsync();
+        var items = await query.Skip(offset).Take(limit)
+            .Select(v => new EssenceVersionResponse(
+                v.Id, v.VersionNumber, v.EssenceJson, v.ChangedByUserId, v.CreatedAt))
+            .ToListAsync();
+
+        return Ok(new PaginatedResponse<EssenceVersionResponse>(items, total, offset, limit));
+    }
+
+    [HttpGet("{id:guid}/versions/{versionNumber:int}")]
+    public async Task<IActionResult> GetVersion(Guid id, int versionNumber)
+    {
+        var version = await _db.EssenceVersions
+            .FirstOrDefaultAsync(v => v.EssenceId == id && v.VersionNumber == versionNumber);
+
+        if (version is null)
+            return NotFound(new ErrorResponse("not_found", "Version not found.", 404));
+
+        return Ok(new EssenceVersionResponse(
+            version.Id, version.VersionNumber, version.EssenceJson,
+            version.ChangedByUserId, version.CreatedAt));
     }
 
     [HttpPost("{id:guid}/clone")]
@@ -105,11 +171,24 @@ public class EssencesController : ControllerBase
             TenantId = _tenant.TenantId,
             Name = request.Name,
             CloudAccountId = source.CloudAccountId,
-            EssenceJson = source.EssenceJson
+            EssenceJson = source.EssenceJson,
+            CurrentVersion = 1
         };
 
         _db.Essences.Add(clone);
+
+        _db.EssenceVersions.Add(new EssenceVersion
+        {
+            EssenceId = clone.Id,
+            VersionNumber = 1,
+            EssenceJson = source.EssenceJson,
+            ChangedByUserId = GetCurrentUserId()
+        });
+
         await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(_tenant.TenantId, GetCurrentUserId(), "clone", "Essence", clone.Id,
+            $"from={id}");
 
         return CreatedAtAction(nameof(Get), new { id = clone.Id }, ToDto(clone));
     }
@@ -123,9 +202,19 @@ public class EssencesController : ControllerBase
 
         _db.Essences.Remove(essence);
         await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(_tenant.TenantId, GetCurrentUserId(), "delete", "Essence", id);
+
         return NoContent();
     }
 
+    private Guid GetCurrentUserId()
+    {
+        var sub = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)
+            ?? User.FindFirst("sub");
+        return sub is not null ? Guid.Parse(sub.Value) : Guid.Empty;
+    }
+
     private static EssenceResponse ToDto(Essence e) =>
-        new(e.Id, e.Name, e.CloudAccountId, e.EssenceJson, e.CreatedAt, e.UpdatedAt);
+        new(e.Id, e.Name, e.CloudAccountId, e.EssenceJson, e.CurrentVersion, e.CreatedAt, e.UpdatedAt);
 }

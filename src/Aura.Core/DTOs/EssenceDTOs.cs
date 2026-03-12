@@ -23,6 +23,7 @@ public sealed record EssenceResponse(
     string Name,
     Guid CloudAccountId,
     string EssenceJson,
+    int CurrentVersion,
     DateTime CreatedAt,
     DateTime UpdatedAt
 );
