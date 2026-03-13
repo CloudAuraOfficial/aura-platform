@@ -177,5 +177,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers().RequireRateLimiting("global");
 app.MapRazorPages();
+app.MapGet("/", () => Results.Redirect("/dashboard"));
 
 app.Run();
