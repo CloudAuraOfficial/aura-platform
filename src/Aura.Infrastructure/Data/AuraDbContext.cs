@@ -29,6 +29,9 @@ public class AuraDbContext : DbContext
     public DbSet<DeploymentLayer> DeploymentLayers => Set<DeploymentLayer>();
     public DbSet<AuditLogEntry> AuditLog => Set<AuditLogEntry>();
     public DbSet<EssenceVersion> EssenceVersions => Set<EssenceVersion>();
+    public DbSet<Experiment> Experiments => Set<Experiment>();
+    public DbSet<ExperimentAssignment> ExperimentAssignments => Set<ExperimentAssignment>();
+    public DbSet<ExperimentEvent> ExperimentEvents => Set<ExperimentEvent>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -93,6 +96,27 @@ public class AuraDbContext : DbContext
             b.Property(l => l.DependsOn).HasColumnType("jsonb");
             b.Property(l => l.ExecutorType).HasConversion<string>();
             b.Property(l => l.Status).HasConversion<string>();
+        });
+
+        // Experiment
+        modelBuilder.Entity<Experiment>(b =>
+        {
+            b.Property(e => e.Variants).HasColumnType("jsonb");
+            b.Property(e => e.Status).HasConversion<string>();
+            b.HasIndex(e => new { e.Project, e.Status });
+        });
+
+        // ExperimentAssignment
+        modelBuilder.Entity<ExperimentAssignment>(b =>
+        {
+            b.HasIndex(a => new { a.ExperimentId, a.SubjectHash }).IsUnique();
+        });
+
+        // ExperimentEvent
+        modelBuilder.Entity<ExperimentEvent>(b =>
+        {
+            b.Property(e => e.Metadata).HasColumnType("jsonb");
+            b.HasIndex(e => new { e.ExperimentId, e.VariantId });
         });
     }
 
