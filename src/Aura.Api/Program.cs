@@ -129,6 +129,7 @@ app.UseCors();
 
 // Health endpoint
 app.MapGet("/health", () => Results.Ok(new { Status = "healthy", Timestamp = DateTime.UtcNow }));
+app.MapMethods("/health", new[] { "HEAD" }, () => Results.Ok());
 
 // Internal deploy webhook — triggers git pull + rebuild on the VPS
 var deploySecret = Environment.GetEnvironmentVariable("DEPLOY_WEBHOOK_SECRET");
