@@ -181,4 +181,27 @@ app.MapControllers().RequireRateLimiting("global");
 app.MapRazorPages();
 app.MapGet("/", () => Results.Redirect("/dashboard"));
 
+// Auto-migrate database on startup (safe for single-instance deployments)
+if (Environment.GetEnvironmentVariable("AUTO_MIGRATE") == "true")
+{
+    using var scope = app.Services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AuraDbContext>();
+    var retries = 5;
+    for (int i = 0; i < retries; i++)
+    {
+        try
+        {
+            Console.WriteLine($"Migration attempt {i + 1}...");
+            db.Database.Migrate();
+            Console.WriteLine("Database migration completed successfully.");
+            break;
+        }
+        catch (Exception ex) when (i < retries - 1)
+        {
+            Console.WriteLine($"Migration attempt {i + 1} failed: {ex.Message}. Retrying in 3s...");
+            Thread.Sleep(3000);
+        }
+    }
+}
+
 app.Run();
