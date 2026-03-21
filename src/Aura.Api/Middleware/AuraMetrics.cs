@@ -42,4 +42,13 @@ public static class AuraMetrics
 
     public static readonly Counter InvitesCreatedTotal = Metrics.CreateCounter(
         "aura_invites_created_total", "Total user invites created");
+
+    // Experiment metrics
+    public static readonly Counter ExperimentAssignmentsTotal = Metrics.CreateCounter(
+        "aura_experiment_assignments_total", "Experiment variant assignments",
+        new CounterConfiguration { LabelNames = new[] { "experiment", "variant" } });
+
+    public static readonly Counter ExperimentEventsTotal = Metrics.CreateCounter(
+        "aura_experiment_events_total", "Experiment metric events tracked",
+        new CounterConfiguration { LabelNames = new[] { "experiment", "metric" } });
 }

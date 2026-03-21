@@ -223,6 +223,29 @@ public class RunWorkerService : BackgroundService
         RunDuration.Observe(runStopwatch.Elapsed.TotalSeconds);
         RunsCompleted.WithLabels(run.Status.ToString()).Inc();
 
+        // Track experiment metrics for completed runs
+        try
+        {
+            var experimentService = scope.ServiceProvider.GetRequiredService<IExperimentService>();
+            var activeExperiments = await experimentService.GetActiveAsync("aura", ct);
+            foreach (var experiment in activeExperiments)
+            {
+                var subjectKey = runId.ToString();
+                var variantId = await experimentService.AssignVariantAsync(experiment.Id, subjectKey, ct);
+                var subjectHash = Infrastructure.Services.ExperimentService.ComputeHash($"{experiment.Id}:{subjectKey}");
+                await experimentService.TrackEventAsync(
+                    experiment.Id, variantId, subjectHash,
+                    "execution_time_seconds", runStopwatch.Elapsed.TotalSeconds,
+                    JsonSerializer.Serialize(new { runId, status = run.Status.ToString() }), ct);
+                _logger.LogInformation("Tracked experiment {ExperimentId} for run {RunId}: variant={Variant}, time={Time}s",
+                    experiment.Id, runId, variantId, runStopwatch.Elapsed.TotalSeconds);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to track experiment metrics for run {RunId}", runId);
+        }
+
         _logger.LogInformation("Run {RunId} completed with status {Status} in {ElapsedMs}ms",
             runId, run.Status, runStopwatch.ElapsedMilliseconds);
         await PublishLogSafe(logStream, runId,

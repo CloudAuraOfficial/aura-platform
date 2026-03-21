@@ -1,0 +1,299 @@
+@page "/dashboard/experiments"
+@{
+    ViewData["Title"] = "Experiments";
+    Layout = "/Pages/Shared/_Layout.cshtml";
+}
+
+<div class="toolbar">
+    <h1>Experiments</h1>
+    <button class="btn btn-primary" onclick="openCreate()">+ New Experiment</button>
+</div>
+<div id="content"><div class="empty">Loading...</div></div>
+
+<!-- Create / Edit Modal -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <h2 id="modalTitle">New Experiment</h2>
+        <div id="modalError" class="alert alert-error" style="display:none"></div>
+        <form onsubmit="return saveExperiment(event)">
+            <input type="hidden" id="editId" />
+            <div class="form-group">
+                <label>Project</label>
+                <input type="text" id="fProject" required maxlength="100" value="aura" />
+            </div>
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="fName" required maxlength="200" />
+            </div>
+            <div class="form-group">
+                <label>Hypothesis</label>
+                <textarea id="fHypothesis" required maxlength="2000" rows="3"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Metric Name</label>
+                <input type="text" id="fMetric" required maxlength="200" placeholder="e.g. execution_time_seconds" />
+            </div>
+            <div class="form-group" id="variantsGroup">
+                <label>Variants (JSON)</label>
+                <textarea id="fVariants" required rows="4" placeholder='[{"id":"control","weight":50},{"id":"variant_a","weight":50}]'></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Results Modal -->
+<div class="modal-overlay" id="resultsModal">
+    <div class="modal" style="max-width:700px">
+        <h2>Experiment Results</h2>
+        <div id="resultsContent"><div class="empty">Loading...</div></div>
+        <div class="modal-actions">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('resultsModal').classList.remove('open')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Conclude Modal -->
+<div class="modal-overlay" id="concludeModal">
+    <div class="modal" style="max-width:500px">
+        <h2>Conclude Experiment</h2>
+        <form onsubmit="return submitConclude(event)">
+            <input type="hidden" id="concludeId" />
+            <div class="form-group">
+                <label>Conclusion</label>
+                <textarea id="fConclusion" required rows="3" placeholder="Summary of findings..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" onclick="document.getElementById('concludeModal').classList.remove('open')">Cancel</button>
+                <button type="submit" class="btn btn-primary">Conclude</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+const token = localStorage.getItem('aura_token');
+if (!token) window.location.href = '/dashboard/login';
+
+async function api(path, opts = {}) {
+    const res = await fetch(path, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        ...opts
+    });
+    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    if (res.status === 204) return {};
+    return await res.json();
+}
+
+function toast(msg, type = 'success') {
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+function badge(status) {
+    const map = { Draft: 'muted', Running: 'success', Paused: 'warning', Concluded: 'info' };
+    return `<span class="badge badge-${map[status] || 'muted'}">${status}</span>`;
+}
+
+function closeModal() { document.getElementById('modal').classList.remove('open'); }
+
+function openCreate() {
+    document.getElementById('modalTitle').textContent = 'New Experiment';
+    document.getElementById('saveBtn').textContent = 'Create';
+    document.getElementById('editId').value = '';
+    document.getElementById('fProject').value = 'aura';
+    document.getElementById('fName').value = '';
+    document.getElementById('fHypothesis').value = '';
+    document.getElementById('fMetric').value = '';
+    document.getElementById('fVariants').value = '[{"id":"control","weight":50},{"id":"variant_a","weight":50}]';
+    document.getElementById('variantsGroup').style.display = 'block';
+    document.getElementById('fProject').disabled = false;
+    document.getElementById('fMetric').disabled = false;
+    document.getElementById('modalError').style.display = 'none';
+    document.getElementById('modal').classList.add('open');
+}
+
+function openEdit(e) {
+    document.getElementById('modalTitle').textContent = 'Edit Experiment';
+    document.getElementById('saveBtn').textContent = 'Save';
+    document.getElementById('editId').value = e.id;
+    document.getElementById('fProject').value = e.project;
+    document.getElementById('fProject').disabled = true;
+    document.getElementById('fName').value = e.name;
+    document.getElementById('fHypothesis').value = e.hypothesis;
+    document.getElementById('fMetric').value = e.metricName;
+    document.getElementById('fMetric').disabled = true;
+    document.getElementById('variantsGroup').style.display = 'none';
+    document.getElementById('modalError').style.display = 'none';
+    document.getElementById('modal').classList.add('open');
+}
+
+async function saveExperiment(ev) {
+    ev.preventDefault();
+    const id = document.getElementById('editId').value;
+    let res;
+    if (id) {
+        res = await api(`/api/v1/experiments/${id}`, {
+            method: 'PUT',
+            body: JSON.stringify({
+                name: document.getElementById('fName').value,
+                hypothesis: document.getElementById('fHypothesis').value
+            })
+        });
+    } else {
+        res = await api('/api/v1/experiments', {
+            method: 'POST',
+            body: JSON.stringify({
+                project: document.getElementById('fProject').value,
+                name: document.getElementById('fName').value,
+                hypothesis: document.getElementById('fHypothesis').value,
+                metricName: document.getElementById('fMetric').value,
+                variants: document.getElementById('fVariants').value
+            })
+        });
+    }
+    if (res?.error) {
+        document.getElementById('modalError').textContent = res.message;
+        document.getElementById('modalError').style.display = 'block';
+        return false;
+    }
+    closeModal();
+    toast(id ? 'Experiment updated' : 'Experiment created');
+    loadExperiments();
+    return false;
+}
+
+async function changeStatus(id, status) {
+    const res = await api(`/api/v1/experiments/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status })
+    });
+    if (res?.error) { toast(res.message, 'error'); return; }
+    toast(`Experiment ${status.toLowerCase()}`);
+    loadExperiments();
+}
+
+function openConclude(id) {
+    document.getElementById('concludeId').value = id;
+    document.getElementById('fConclusion').value = '';
+    document.getElementById('concludeModal').classList.add('open');
+}
+
+async function submitConclude(ev) {
+    ev.preventDefault();
+    const id = document.getElementById('concludeId').value;
+    const res = await api(`/api/v1/experiments/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+            status: 'Concluded',
+            conclusion: document.getElementById('fConclusion').value
+        })
+    });
+    if (res?.error) { toast(res.message, 'error'); return false; }
+    document.getElementById('concludeModal').classList.remove('open');
+    toast('Experiment concluded');
+    loadExperiments();
+    return false;
+}
+
+async function viewResults(id) {
+    const data = await api(`/api/v1/experiments/${id}/results`);
+    if (!data) return;
+
+    let html = `<h3>${data.name}</h3><p>Metric: <code>${data.metricName}</code></p>`;
+
+    const variants = Object.entries(data.variants);
+    if (variants.length === 0) {
+        html += '<div class="empty">No data collected yet</div>';
+    } else {
+        const maxMean = Math.max(...variants.map(([,v]) => v.mean)) || 1;
+        html += '<table><thead><tr><th>Variant</th><th>N</th><th>Mean</th><th>StdDev</th><th>Min</th><th>Max</th><th></th></tr></thead><tbody>';
+        for (const [name, v] of variants) {
+            const pct = (v.mean / maxMean * 100).toFixed(0);
+            html += `<tr>
+                <td><strong>${name}</strong></td>
+                <td>${v.sampleSize}</td>
+                <td>${v.mean.toFixed(4)}</td>
+                <td>${v.stdDev.toFixed(4)}</td>
+                <td>${v.min.toFixed(4)}</td>
+                <td>${v.max.toFixed(4)}</td>
+                <td style="width:120px"><div style="background:var(--accent);height:18px;width:${pct}%;border-radius:3px"></div></td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+
+        if (data.significance) {
+            const s = data.significance;
+            const verdict = s.isSignificant
+                ? '<span class="badge badge-success">Statistically Significant</span>'
+                : '<span class="badge badge-muted">Not Significant</span>';
+            html += `<div style="margin-top:16px;padding:12px;border:1px solid var(--border);border-radius:6px">
+                <strong>Statistical Significance</strong> ${verdict}<br/>
+                <small>t = ${s.tStatistic.toFixed(4)} &middot; p = ${s.pValue.toFixed(6)} &middot; df = ${s.degreesOfFreedom} &middot; confidence = ${(s.confidenceLevel*100).toFixed(0)}%</small>
+            </div>`;
+        }
+    }
+
+    document.getElementById('resultsContent').innerHTML = html;
+    document.getElementById('resultsModal').classList.add('open');
+}
+
+async function loadExperiments() {
+    const data = await api('/api/v1/experiments?limit=100');
+    if (!data || data.items.length === 0) {
+        document.getElementById('content').innerHTML = '<div class="empty">No experiments yet. Create your first one!</div>';
+        return;
+    }
+
+    let html = '<table><thead><tr><th>Name</th><th>Project</th><th>Status</th><th>Metric</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
+    for (const e of data.items) {
+        const created = new Date(e.createdAt).toLocaleDateString();
+        let actions = `<button class="btn btn-secondary btn-sm" onclick="viewResults('${e.id}')">Results</button> `;
+
+        if (e.status === 'Draft' || e.status === 'Paused') {
+            actions += `<button class="btn btn-primary btn-sm" onclick="changeStatus('${e.id}','Running')">Start</button> `;
+        }
+        if (e.status === 'Running') {
+            actions += `<button class="btn btn-warning btn-sm" onclick="changeStatus('${e.id}','Paused')">Pause</button> `;
+        }
+        if (e.status === 'Running' || e.status === 'Paused') {
+            actions += `<button class="btn btn-danger btn-sm" onclick="openConclude('${e.id}')">Conclude</button> `;
+        }
+        if (e.status === 'Draft') {
+            actions += `<button class="btn btn-secondary btn-sm" onclick='openEdit(${JSON.stringify(e)})'>Edit</button> `;
+        }
+
+        html += `<tr>
+            <td>${e.name}</td>
+            <td><code>${e.project}</code></td>
+            <td>${badge(e.status)}</td>
+            <td><code>${e.metricName}</code></td>
+            <td>${created}</td>
+            <td class="actions">${actions}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+
+    // Show concluded experiments with conclusions
+    const concluded = data.items.filter(e => e.status === 'Concluded' && e.conclusion);
+    if (concluded.length > 0) {
+        html += '<h2 style="margin-top:24px">Conclusions</h2>';
+        for (const e of concluded) {
+            html += `<div style="padding:12px;margin-bottom:8px;border:1px solid var(--border);border-radius:6px">
+                <strong>${e.name}</strong><br/>
+                <small>${e.conclusion}</small>
+            </div>`;
+        }
+    }
+
+    document.getElementById('content').innerHTML = html;
+}
+
+loadExperiments();
+</script>
