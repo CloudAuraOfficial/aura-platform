@@ -20,6 +20,7 @@ TestResults/
 
 ## Environment
 .env
+.env.azure
 appsettings.*.local.json
 docker-compose.override.yml
 
