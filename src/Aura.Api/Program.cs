@@ -116,7 +116,9 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(
     ConnectionMultiplexer.Connect($"{redisHost}:{redisPort},abortConnect=false"));
 builder.Services.AddSingleton<ILogStreamService, RedisLogStreamService>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(
+        new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.Services.AddRazorPages();
 
 var app = builder.Build();
