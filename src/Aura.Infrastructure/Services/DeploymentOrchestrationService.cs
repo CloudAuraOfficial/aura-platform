@@ -74,14 +74,48 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 continue;
 
             var executorTypeStr = val.TryGetProperty("executorType", out var execProp)
-                ? execProp.GetString() ?? "powershell"
-                : "powershell";
+                ? execProp.GetString() ?? ""
+                : "";
 
-            var executorType = ParseExecutorType(executorTypeStr);
+            var operationType = val.TryGetProperty("operationType", out var opTypeProp)
+                ? opTypeProp.GetString()
+                : null;
+
+            ExecutorType executorType;
+            if (!string.IsNullOrEmpty(operationType) && string.IsNullOrEmpty(executorTypeStr))
+                executorType = ExecutorType.Operation;
+            else
+                executorType = ParseExecutorType(string.IsNullOrEmpty(executorTypeStr) ? "powershell" : executorTypeStr);
 
             var parameters = val.TryGetProperty("parameters", out var paramsProp)
                 ? paramsProp.GetRawText()
                 : "{}";
+
+            // Inject operationType into parameters so OperationExecutor can read it
+            if (!string.IsNullOrEmpty(operationType))
+            {
+                using var paramDoc = JsonDocument.Parse(parameters);
+                var dict = new Dictionary<string, JsonElement>();
+                foreach (var p in paramDoc.RootElement.EnumerateObject())
+                    dict[p.Name] = p.Value.Clone();
+
+                if (!dict.ContainsKey("operationType"))
+                {
+                    using var stream = new System.IO.MemoryStream();
+                    using (var writer = new System.Text.Json.Utf8JsonWriter(stream))
+                    {
+                        writer.WriteStartObject();
+                        writer.WriteString("operationType", operationType);
+                        foreach (var kvp in dict)
+                        {
+                            writer.WritePropertyName(kvp.Key);
+                            kvp.Value.WriteTo(writer);
+                        }
+                        writer.WriteEndObject();
+                    }
+                    parameters = System.Text.Encoding.UTF8.GetString(stream.ToArray());
+                }
+            }
 
             var scriptPath = val.TryGetProperty("scriptPath", out var scriptProp)
                 ? scriptProp.GetString()
@@ -98,7 +132,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 }
             }
 
-            definitions[name] = new LayerDefinition(name, executorType, parameters, scriptPath, dependsOn);
+            definitions[name] = new LayerDefinition(name, executorType, parameters, scriptPath, dependsOn, operationType);
         }
 
         // Remove dependencies on disabled/missing layers
@@ -122,6 +156,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 Status = LayerStatus.Pending,
                 Parameters = def.Parameters,
                 ScriptPath = def.ScriptPath,
+                OperationType = def.OperationType,
                 DependsOn = JsonSerializer.Serialize(def.DependsOn),
                 SortOrder = i
             });
@@ -171,6 +206,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         "powershell" => ExecutorType.PowerShell,
         "python" => ExecutorType.Python,
         "csharp_sdk" => ExecutorType.CSharpSdk,
+        "operation" => ExecutorType.Operation,
         _ => throw new InvalidOperationException($"Unknown executor type: {value}")
     };
 
@@ -179,6 +215,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         ExecutorType ExecutorType,
         string Parameters,
         string? ScriptPath,
-        List<string> DependsOn
+        List<string> DependsOn,
+        string? OperationType = null
     );
 }

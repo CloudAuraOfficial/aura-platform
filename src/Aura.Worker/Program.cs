@@ -2,6 +2,9 @@ using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations;
+using Aura.Worker.Operations.Azure;
+using Aura.Worker.Operations.Common;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
 using Prometheus;
@@ -38,6 +41,32 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<PowerShellExecutor>();
     services.AddTransient<PythonExecutor>();
     services.AddTransient<CSharpSdkExecutor>();
+    services.AddTransient<OperationExecutor>();
+
+    // Operation handlers
+    services.AddTransient<CreateResourceGroupHandler>();
+    services.AddTransient<CreateContainerRegistryHandler>();
+    services.AddTransient<BuildContainerImageHandler>();
+    services.AddTransient<PushContainerImageHandler>();
+    services.AddTransient<ImportContainerImageHandler>();
+    services.AddTransient<CreateContainerGroupHandler>();
+    services.AddTransient<StopContainerGroupHandler>();
+    services.AddTransient<DeleteContainerGroupHandler>();
+    services.AddTransient<HttpHealthCheckHandler>();
+    services.AddHttpClient();
+
+    // Operation registry
+    var registry = new OperationRegistry();
+    registry.Register<CreateResourceGroupHandler>("CreateResourceGroup");
+    registry.Register<CreateContainerRegistryHandler>("CreateContainerRegistry");
+    registry.Register<BuildContainerImageHandler>("BuildContainerImage");
+    registry.Register<PushContainerImageHandler>("PushContainerImage");
+    registry.Register<ImportContainerImageHandler>("ImportContainerImage");
+    registry.Register<CreateContainerGroupHandler>("CreateContainerGroup");
+    registry.Register<StopContainerGroupHandler>("StopContainerGroup");
+    registry.Register<DeleteContainerGroupHandler>("DeleteContainerGroup");
+    registry.Register<HttpHealthCheckHandler>("HttpHealthCheck");
+    services.AddSingleton(registry);
 
     // Redis + log streaming
     var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "localhost";

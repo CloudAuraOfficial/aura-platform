@@ -6,6 +6,7 @@ using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Prometheus;
@@ -128,6 +129,8 @@ public class RunWorkerService : BackgroundService
             .IgnoreQueryFilters()
             .Include(r => r.Layers.OrderBy(l => l.SortOrder))
             .Include(r => r.Deployment)
+                .ThenInclude(d => d.Essence)
+                    .ThenInclude(e => e.CloudAccount)
             .FirstOrDefaultAsync(r => r.Id == runId, ct);
 
         if (run is null || run.Status != RunStatus.Queued)
@@ -144,7 +147,7 @@ public class RunWorkerService : BackgroundService
             $"Run started with {run.Layers.Count} layer(s)", ct);
 
         // Decrypt BYOS credentials if cloud account is linked
-        var envVars = await BuildEnvVarsAsync(db, crypto, run.SnapshotJson, ct);
+        var envVars = await BuildEnvVarsAsync(db, crypto, run, ct);
 
         // Execute layers in topological order
         var failed = false;
@@ -312,14 +315,14 @@ public class RunWorkerService : BackgroundService
         await db.SaveChangesAsync(ct);
     }
 
-    private static Task<Dictionary<string, string>> BuildEnvVarsAsync(
-        AuraDbContext db, ICryptoService crypto, string snapshotJson, CancellationToken ct)
+    private static async Task<Dictionary<string, string>> BuildEnvVarsAsync(
+        AuraDbContext db, ICryptoService crypto, DeploymentRun run, CancellationToken ct)
     {
         var envVars = new Dictionary<string, string>();
 
         try
         {
-            using var doc = JsonDocument.Parse(snapshotJson);
+            using var doc = JsonDocument.Parse(run.SnapshotJson);
             if (doc.RootElement.TryGetProperty("baseEssence", out var baseEssence))
             {
                 if (baseEssence.TryGetProperty("cloudProvider", out var provider))
@@ -331,7 +334,6 @@ public class RunWorkerService : BackgroundService
                 if (baseEssence.TryGetProperty("uniqueId", out var uniqueId))
                     envVars["AURA_UNIQUE_ID"] = uniqueId.GetString() ?? "";
 
-                // Look up cloud account credentials
                 if (baseEssence.TryGetProperty("subscriptionId", out var subId))
                     envVars["AURA_SUBSCRIPTION_ID"] = subId.GetString() ?? "";
             }
@@ -341,7 +343,30 @@ public class RunWorkerService : BackgroundService
             // Non-critical: snapshot may not have baseEssence
         }
 
-        return Task.FromResult(envVars);
+        // Resolve BYOS credentials from the linked CloudAccount
+        try
+        {
+            var cloudAccount = run.Deployment?.Essence?.CloudAccount;
+            if (cloudAccount is null && run.Deployment?.Essence?.CloudAccountId is Guid accountId
+                && accountId != Guid.Empty)
+            {
+                cloudAccount = await db.CloudAccounts.FindAsync(new object[] { accountId }, ct);
+            }
+
+            if (cloudAccount is not null && !string.IsNullOrEmpty(cloudAccount.EncryptedCredentials))
+            {
+                var decrypted = crypto.Decrypt(cloudAccount.EncryptedCredentials);
+                var credentials = JsonSerializer.Deserialize<Dictionary<string, string>>(decrypted)
+                    ?? new Dictionary<string, string>();
+                ByosResolver.PopulateEnvVars(envVars, credentials);
+            }
+        }
+        catch
+        {
+            // Non-critical: cloud account may not exist or credentials may be invalid
+        }
+
+        return envVars;
     }
 
     private static ILayerExecutor ResolveExecutor(IServiceProvider sp, ExecutorType type) => type switch
@@ -349,6 +374,7 @@ public class RunWorkerService : BackgroundService
         ExecutorType.PowerShell => sp.GetRequiredService<PowerShellExecutor>(),
         ExecutorType.Python => sp.GetRequiredService<PythonExecutor>(),
         ExecutorType.CSharpSdk => sp.GetRequiredService<CSharpSdkExecutor>(),
+        ExecutorType.Operation => sp.GetRequiredService<OperationExecutor>(),
         _ => throw new InvalidOperationException($"Unknown executor type: {type}")
     };
 

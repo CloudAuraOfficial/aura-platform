@@ -1,0 +1,80 @@
+{
+  "baseEssence": {
+    "name": "Aura Platform — Azure ACI",
+    "description": "Deploy Aura API + PostgreSQL 16 + Redis 7 to Azure Container Instances",
+    "cloudProvider": "Azure",
+    "defaultRegion": "eastus",
+    "subscriptionId": "${AZURE_SUBSCRIPTION_ID}"
+  },
+  "layers": {
+    "StageScripts": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "scripts/stage-scripts.ps1",
+      "parameters": {
+        "repoRoot": "/home/rogerclaude/aura-platform"
+      },
+      "dependsOn": []
+    },
+    "ValidatePrerequisites": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "scripts/validate-prerequisites.ps1",
+      "parameters": {
+        "resourceGroup": "cloudaura-rg",
+        "acrName": "cloudauraregistry",
+        "location": "eastus"
+      },
+      "dependsOn": ["StageScripts"]
+    },
+    "BuildAndPushImages": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "scripts/build-push-images.ps1",
+      "parameters": {
+        "acrName": "cloudauraregistry",
+        "imageTag": "latest",
+        "repoRoot": "/home/rogerclaude/aura-platform"
+      },
+      "dependsOn": ["ValidatePrerequisites"]
+    },
+    "DeployContainerGroup": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "scripts/deploy-aci.ps1",
+      "parameters": {
+        "resourceGroup": "cloudaura-rg",
+        "acrName": "cloudauraregistry",
+        "imageTag": "latest",
+        "location": "eastus",
+        "dnsLabel": "cloudaura-api",
+        "bicepPath": "infra/azure/main.bicep",
+        "apiCpu": "0.5",
+        "apiMemory": "1.0"
+      },
+      "dependsOn": ["BuildAndPushImages"]
+    },
+    "HealthCheck": {
+      "isEnabled": true,
+      "executorType": "python",
+      "scriptPath": "scripts/health-check.py",
+      "parameters": {
+        "fqdn": "cloudaura-api.eastus.azurecontainer.io",
+        "port": "8000",
+        "maxRetries": "12",
+        "retryDelaySeconds": "10"
+      },
+      "dependsOn": ["DeployContainerGroup"]
+    },
+    "SmokeTest": {
+      "isEnabled": true,
+      "executorType": "python",
+      "scriptPath": "scripts/smoke-test.py",
+      "parameters": {
+        "fqdn": "cloudaura-api.eastus.azurecontainer.io",
+        "port": "8000"
+      },
+      "dependsOn": ["HealthCheck"]
+    }
+  }
+}

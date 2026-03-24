@@ -1,0 +1,180 @@
+{
+  "baseEssence": {
+    "EssenceName": "DeployAuraACI",
+    "EssenceID": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "cloudProvider": "Azure",
+    "subscriptionId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "tenantId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "Schedule": "0 2 * * *",
+    "uniqueId": "cloudaura-prod",
+    "baseLoad": "EmissionLoadACI",
+    "defaultRegion": "eastus"
+  },
+  "layers": {
+    "ResourceGroup": {
+      "isEnabled": true,
+      "operationType": "CreateResourceGroup",
+      "parameters": {
+        "resourceGroupName": "cloudaura-rg",
+        "location": "eastus"
+      }
+    },
+    "ContainerRegistry": {
+      "isEnabled": true,
+      "operationType": "CreateContainerRegistry",
+      "parameters": {
+        "registryName": "cloudauraregistry",
+        "resourceGroup": "cloudaura-rg",
+        "sku": "Basic",
+        "adminEnabled": true
+      },
+      "dependsOn": ["ResourceGroup"]
+    },
+    "BuildApiImage": {
+      "isEnabled": true,
+      "operationType": "BuildContainerImage",
+      "parameters": {
+        "imageName": "aura-api",
+        "imageTag": "latest",
+        "dockerfilePath": ".",
+        "buildTarget": "api",
+        "registryName": "cloudauraregistry"
+      },
+      "dependsOn": ["ContainerRegistry"]
+    },
+    "PushApiImage": {
+      "isEnabled": true,
+      "operationType": "PushContainerImage",
+      "parameters": {
+        "imageName": "aura-api",
+        "imageTag": "latest",
+        "registryName": "cloudauraregistry"
+      },
+      "dependsOn": ["BuildApiImage"]
+    },
+    "ImportPostgresImage": {
+      "isEnabled": true,
+      "operationType": "ImportContainerImage",
+      "parameters": {
+        "sourceImage": "docker.io/library/postgres:16-alpine",
+        "targetImage": "postgres:16-alpine",
+        "registryName": "cloudauraregistry"
+      },
+      "dependsOn": ["ContainerRegistry"]
+    },
+    "ImportRedisImage": {
+      "isEnabled": true,
+      "operationType": "ImportContainerImage",
+      "parameters": {
+        "sourceImage": "docker.io/library/redis:7-alpine",
+        "targetImage": "redis:7-alpine",
+        "registryName": "cloudauraregistry"
+      },
+      "dependsOn": ["ContainerRegistry"]
+    },
+    "DeployContainerGroup": {
+      "isEnabled": true,
+      "operationType": "CreateContainerGroup",
+      "parameters": {
+        "containerGroupName": "aura-api",
+        "resourceGroup": "cloudaura-rg",
+        "location": "eastus",
+        "osType": "Linux",
+        "dnsLabel": "cloudaura-api",
+        "ipType": "Public",
+        "registryName": "cloudauraregistry",
+        "containers": [
+          {
+            "name": "aura-api",
+            "image": "aura-api:latest",
+            "cpu": 0.5,
+            "memoryInGB": 1.0,
+            "ports": [8000],
+            "environmentVariables": {
+              "ASPNETCORE_ENVIRONMENT": "Production",
+              "ASPNETCORE_URLS": "http://+:8000",
+              "POSTGRES_HOST": "localhost",
+              "POSTGRES_PORT": "5432",
+              "POSTGRES_DB": "aura",
+              "POSTGRES_USER": "aura",
+              "REDIS_HOST": "localhost",
+              "REDIS_PORT": "6379",
+              "CORS_ORIGINS": "*",
+              "AUTO_MIGRATE": "true",
+              "JWT_ISSUER": "aura-api",
+              "JWT_AUDIENCE": "aura-client",
+              "JWT_EXPIRY_MINUTES": "60"
+            },
+            "secureEnvironmentVariables": {
+              "JWT_SECRET": "${BYOS_JWT_SECRET}",
+              "ENCRYPTION_KEY": "${BYOS_ENCRYPTION_KEY}",
+              "POSTGRES_PASSWORD": "${BYOS_POSTGRES_PASSWORD}"
+            }
+          },
+          {
+            "name": "postgres",
+            "image": "postgres:16-alpine",
+            "cpu": 0.5,
+            "memoryInGB": 0.5,
+            "ports": [5432],
+            "environmentVariables": {
+              "POSTGRES_DB": "aura",
+              "POSTGRES_USER": "aura"
+            },
+            "secureEnvironmentVariables": {
+              "POSTGRES_PASSWORD": "${BYOS_POSTGRES_PASSWORD}"
+            }
+          },
+          {
+            "name": "redis",
+            "image": "redis:7-alpine",
+            "cpu": 0.25,
+            "memoryInGB": 0.3,
+            "ports": [6379]
+          }
+        ]
+      },
+      "dependsOn": ["PushApiImage", "ImportPostgresImage", "ImportRedisImage"]
+    },
+    "HealthCheck": {
+      "isEnabled": true,
+      "operationType": "HttpHealthCheck",
+      "parameters": {
+        "endpoint": "http://cloudaura-api.eastus.azurecontainer.io:8000/health",
+        "expectedStatus": 200,
+        "maxRetries": 12,
+        "retryDelaySeconds": 10
+      },
+      "dependsOn": ["DeployContainerGroup"]
+    },
+    "SmokeTest": {
+      "isEnabled": true,
+      "operationType": "HttpHealthCheck",
+      "parameters": {
+        "endpoint": "http://cloudaura-api.eastus.azurecontainer.io:8000/metrics",
+        "expectedStatus": 200,
+        "maxRetries": 3,
+        "retryDelaySeconds": 5
+      },
+      "dependsOn": ["HealthCheck"]
+    },
+    "StopContainerGroup": {
+      "isEnabled": false,
+      "operationType": "StopContainerGroup",
+      "parameters": {
+        "containerGroupName": "aura-api",
+        "resourceGroup": "cloudaura-rg"
+      },
+      "dependsOn": ["DeployContainerGroup"]
+    },
+    "DeleteContainerGroup": {
+      "isEnabled": false,
+      "operationType": "DeleteContainerGroup",
+      "parameters": {
+        "containerGroupName": "aura-api",
+        "resourceGroup": "cloudaura-rg"
+      },
+      "dependsOn": ["StopContainerGroup"]
+    }
+  }
+}

@@ -11,6 +11,7 @@ public class DeploymentLayer : BaseEntity
     public LayerStatus Status { get; set; } = LayerStatus.Pending;
     public string Parameters { get; set; } = "{}";
     public string? ScriptPath { get; set; }
+    public string? OperationType { get; set; }
     public string DependsOn { get; set; } = "[]";
     public int SortOrder { get; set; }
     public string? Output { get; set; }

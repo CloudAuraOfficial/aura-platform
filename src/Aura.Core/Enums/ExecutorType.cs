@@ -4,5 +4,6 @@ public enum ExecutorType
 {
     PowerShell = 0,
     Python = 1,
-    CSharpSdk = 2
+    CSharpSdk = 2,
+    Operation = 3
 }

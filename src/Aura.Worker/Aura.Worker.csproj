@@ -8,6 +8,11 @@
     <InternalsVisibleTo Include="Aura.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.13.2" />
+    <PackageReference Include="Azure.ResourceManager" Version="1.13.2" />
+    <PackageReference Include="Azure.ResourceManager.ContainerInstance" Version="1.3.0" />
+    <PackageReference Include="Azure.ResourceManager.ContainerRegistry" Version="1.3.0" />
+    <PackageReference Include="Azure.ResourceManager.Resources" Version="1.9.0" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
