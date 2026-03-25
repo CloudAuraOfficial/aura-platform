@@ -57,7 +57,7 @@
       "dependsOn": ["BuildApiImage"]
     },
     "ImportPostgresImage": {
-      "isEnabled": false,
+      "isEnabled": true,
       "operationType": "ImportContainerImage",
       "parameters": {
         "sourceImage": "docker.io/library/postgres:16-alpine",
@@ -68,7 +68,7 @@
       "dependsOn": ["ContainerRegistry"]
     },
     "ImportRedisImage": {
-      "isEnabled": false,
+      "isEnabled": true,
       "operationType": "ImportContainerImage",
       "parameters": {
         "sourceImage": "docker.io/library/redis:7-alpine",
@@ -140,7 +140,7 @@
           }
         ]
       },
-      "dependsOn": ["PushApiImage"]
+      "dependsOn": ["PushApiImage", "ImportPostgresImage", "ImportRedisImage"]
     },
     "HealthCheck": {
       "isEnabled": true,
