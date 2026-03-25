@@ -53,6 +53,10 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<StopContainerGroupHandler>();
     services.AddTransient<DeleteContainerGroupHandler>();
     services.AddTransient<HttpHealthCheckHandler>();
+    services.AddTransient<CreateVMHandler>();
+    services.AddTransient<StartVMHandler>();
+    services.AddTransient<StopVMHandler>();
+    services.AddTransient<DeleteVMHandler>();
     services.AddHttpClient();
 
     // Operation registry
@@ -66,6 +70,10 @@ builder.ConfigureServices((context, services) =>
     registry.Register<StopContainerGroupHandler>("StopContainerGroup");
     registry.Register<DeleteContainerGroupHandler>("DeleteContainerGroup");
     registry.Register<HttpHealthCheckHandler>("HttpHealthCheck");
+    registry.Register<CreateVMHandler>("CreateVM");
+    registry.Register<StartVMHandler>("StartVM");
+    registry.Register<StopVMHandler>("StopVM");
+    registry.Register<DeleteVMHandler>("DeleteVM");
     services.AddSingleton(registry);
 
     // Redis + log streaming

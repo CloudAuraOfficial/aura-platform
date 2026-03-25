@@ -1,0 +1,73 @@
+{
+  "baseEssence": {
+    "EssenceName": "DeploySmallVM",
+    "EssenceID": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+    "cloudProvider": "Azure",
+    "subscriptionId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "tenantId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "uniqueId": "cloudaura-vm",
+    "baseLoad": "EmissionLoadVM",
+    "defaultRegion": "eastus"
+  },
+  "layers": {
+    "ResourceGroup": {
+      "isEnabled": true,
+      "operationType": "CreateResourceGroup",
+      "parameters": {
+        "resourceGroupName": "cloudaura-vm-rg",
+        "location": "eastus"
+      }
+    },
+    "CreateVM": {
+      "isEnabled": true,
+      "operationType": "CreateVM",
+      "parameters": {
+        "vmName": "cloudaura-vm",
+        "resourceGroup": "cloudaura-vm-rg",
+        "location": "eastus",
+        "vmSize": "Standard_B2pts_v2",
+        "adminUsername": "azureuser",
+        "adminPassword": "${BYOS_VM_ADMIN_PASSWORD}",
+        "osImage": {
+          "publisher": "Canonical",
+          "offer": "ubuntu-24_04-lts",
+          "sku": "server-arm64",
+          "version": "latest"
+        },
+        "osDiskSizeGB": 30,
+        "openPorts": [22, 80, 443]
+      },
+      "dependsOn": ["ResourceGroup"]
+    },
+    "HealthCheck": {
+      "isEnabled": false,
+      "operationType": "HttpHealthCheck",
+      "parameters": {
+        "endpoint": "http://${VM_PUBLIC_IP}:22",
+        "expectedStatus": 200,
+        "maxRetries": 6,
+        "retryDelaySeconds": 10
+      },
+      "dependsOn": ["CreateVM"]
+    },
+    "StopVM": {
+      "isEnabled": false,
+      "operationType": "StopVM",
+      "parameters": {
+        "vmName": "cloudaura-vm",
+        "resourceGroup": "cloudaura-vm-rg"
+      },
+      "dependsOn": ["CreateVM"]
+    },
+    "DeleteVM": {
+      "isEnabled": false,
+      "operationType": "DeleteVM",
+      "parameters": {
+        "vmName": "cloudaura-vm",
+        "resourceGroup": "cloudaura-vm-rg",
+        "deleteNetworking": true
+      },
+      "dependsOn": ["StopVM"]
+    }
+  }
+}
