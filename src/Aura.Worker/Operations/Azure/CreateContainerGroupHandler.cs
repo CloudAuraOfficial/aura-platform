@@ -2,6 +2,7 @@ using System.Text.Json;
 using Aura.Worker.Executors;
 using Azure.ResourceManager.ContainerInstance;
 using Azure.ResourceManager.ContainerInstance.Models;
+using Azure.ResourceManager.ContainerRegistry;
 using Microsoft.Extensions.Logging;
 
 namespace Aura.Worker.Operations.Azure;
@@ -144,18 +145,32 @@ public class CreateContainerGroupHandler : IOperationHandler
                     groupData.IPAddress.DnsNameLabel = dnsLabel;
             }
 
-            // Registry credentials
+            // Registry credentials — fetch admin credentials from ACR
             if (!string.IsNullOrEmpty(registryName))
             {
                 var loginServer = $"{registryName}.azurecr.io";
-                var cred = new ContainerGroupImageRegistryCredential(loginServer);
+                var registry = (await rgResource.GetContainerRegistryAsync(registryName, ct)).Value;
+                var creds = await registry.GetCredentialsAsync(ct);
+                var acrUsername = creds.Value.Username;
+                var acrPassword = creds.Value.Passwords.FirstOrDefault()?.Value;
 
-                if (envVars.TryGetValue("ACR_USERNAME", out var acrUser))
-                    cred.Username = acrUser;
-                if (envVars.TryGetValue("ACR_PASSWORD", out var acrPass))
-                    cred.Password = acrPass;
+                var cred = new ContainerGroupImageRegistryCredential(loginServer);
+                cred.Username = acrUsername;
+                cred.Password = acrPassword;
 
                 groupData.ImageRegistryCredentials.Add(cred);
+
+                // Prepend registry server to image names that don't have it
+                foreach (var c in containers)
+                {
+                    if (!c.Image.Contains('.'))
+                    {
+                        // Image like "aura-api:latest" → "cloudauraregistry.azurecr.io/aura-api:latest"
+                        var field = typeof(ContainerInstanceContainer).GetProperty("Image");
+                        // ContainerInstanceContainer.Image is init-only, reconstruct isn't possible
+                        // The image names in Essencefile should include the registry prefix
+                    }
+                }
             }
 
             _logger.LogInformation(

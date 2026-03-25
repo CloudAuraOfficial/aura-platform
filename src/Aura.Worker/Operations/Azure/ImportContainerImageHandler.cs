@@ -43,10 +43,13 @@ public class ImportContainerImageHandler : IOperationHandler
             var rgResource = (await subscription.GetResourceGroupAsync(resourceGroup, ct)).Value;
             var registry = (await rgResource.GetContainerRegistryAsync(registryName, ct)).Value;
 
+            // Pass the full source image reference — the SDK handles registry resolution
             var importSource = new ContainerRegistryImportSource(sourceImage);
+
             var importContent = new ContainerRegistryImportImageContent(importSource)
             {
-                TargetTags = { targetImage }
+                TargetTags = { targetImage },
+                Mode = ContainerRegistryImportMode.Force
             };
 
             _logger.LogInformation(

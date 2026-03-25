@@ -55,8 +55,11 @@ public class OperationExecutor : ILayerExecutor
         {
             var handler = _registry.Resolve(_serviceProvider, operationType);
 
+            // Resolve ${BYOS_*} references in parameters using credentials from envVars
+            var resolvedParams = ByosResolver.Resolve(layer.Parameters, envVars);
+
             JsonElement parameters;
-            using var doc = JsonDocument.Parse(layer.Parameters);
+            using var doc = JsonDocument.Parse(resolvedParams);
             parameters = doc.RootElement.Clone();
 
             return await handler.ExecuteAsync(layer.LayerName, parameters, envVars, ct);

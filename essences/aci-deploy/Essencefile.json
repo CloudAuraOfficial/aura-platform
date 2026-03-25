@@ -25,7 +25,7 @@
       "parameters": {
         "registryName": "cloudauraregistry",
         "resourceGroup": "cloudaura-rg",
-        "sku": "Basic",
+        "sku": "Standard",
         "adminEnabled": true
       },
       "dependsOn": ["ResourceGroup"]
@@ -36,9 +36,12 @@
       "parameters": {
         "imageName": "aura-api",
         "imageTag": "latest",
-        "dockerfilePath": ".",
+        "dockerfilePath": "Dockerfile",
         "buildTarget": "api",
-        "registryName": "cloudauraregistry"
+        "registryName": "cloudauraregistry",
+        "resourceGroup": "cloudaura-rg",
+        "sourceUrl": "https://github.com/CloudAuraOfficial/aura-platform.git",
+        "timeoutSeconds": 900
       },
       "dependsOn": ["ContainerRegistry"]
     },
@@ -48,27 +51,30 @@
       "parameters": {
         "imageName": "aura-api",
         "imageTag": "latest",
-        "registryName": "cloudauraregistry"
+        "registryName": "cloudauraregistry",
+        "resourceGroup": "cloudaura-rg"
       },
       "dependsOn": ["BuildApiImage"]
     },
     "ImportPostgresImage": {
-      "isEnabled": true,
+      "isEnabled": false,
       "operationType": "ImportContainerImage",
       "parameters": {
         "sourceImage": "docker.io/library/postgres:16-alpine",
         "targetImage": "postgres:16-alpine",
-        "registryName": "cloudauraregistry"
+        "registryName": "cloudauraregistry",
+        "resourceGroup": "cloudaura-rg"
       },
       "dependsOn": ["ContainerRegistry"]
     },
     "ImportRedisImage": {
-      "isEnabled": true,
+      "isEnabled": false,
       "operationType": "ImportContainerImage",
       "parameters": {
         "sourceImage": "docker.io/library/redis:7-alpine",
         "targetImage": "redis:7-alpine",
-        "registryName": "cloudauraregistry"
+        "registryName": "cloudauraregistry",
+        "resourceGroup": "cloudaura-rg"
       },
       "dependsOn": ["ContainerRegistry"]
     },
@@ -86,7 +92,7 @@
         "containers": [
           {
             "name": "aura-api",
-            "image": "aura-api:latest",
+            "image": "cloudauraregistry.azurecr.io/aura-api:latest",
             "cpu": 0.5,
             "memoryInGB": 1.0,
             "ports": [8000],
@@ -113,7 +119,7 @@
           },
           {
             "name": "postgres",
-            "image": "postgres:16-alpine",
+            "image": "cloudauraregistry.azurecr.io/postgres:16-alpine",
             "cpu": 0.5,
             "memoryInGB": 0.5,
             "ports": [5432],
@@ -127,14 +133,14 @@
           },
           {
             "name": "redis",
-            "image": "redis:7-alpine",
+            "image": "cloudauraregistry.azurecr.io/redis:7-alpine",
             "cpu": 0.25,
             "memoryInGB": 0.3,
             "ports": [6379]
           }
         ]
       },
-      "dependsOn": ["PushApiImage", "ImportPostgresImage", "ImportRedisImage"]
+      "dependsOn": ["PushApiImage"]
     },
     "HealthCheck": {
       "isEnabled": true,
