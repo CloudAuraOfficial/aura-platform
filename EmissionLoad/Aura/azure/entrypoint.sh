@@ -281,6 +281,13 @@ YAMLEOF
         echo "[EmissionLoad-Azure] Container group deleted."
         ;;
 
+    DeleteResourceGroup)
+        RG_NAME=$(param "resourceGroupName")
+        echo "[EmissionLoad-Azure] Deleting resource group '$RG_NAME'..."
+        az group delete --name "$RG_NAME" --yes --no-wait --output none
+        echo "[EmissionLoad-Azure] Resource group deletion initiated (async)."
+        ;;
+
     HttpHealthCheck)
         ENDPOINT=$(param "endpoint")
         EXPECTED=$(param_default "expectedStatus" "200")

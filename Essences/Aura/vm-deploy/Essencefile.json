@@ -8,7 +8,7 @@
     "uniqueId": "cloudaura-vm",
     "baseLoad": "EmissionLoadVM",
     "defaultRegion": "eastus",
-    "Schedule": "0 3 * * 1"
+    "Schedule": "*/5 * * * *"
   },
   "layers": {
     "ResourceGroup": {
@@ -40,19 +40,8 @@
       },
       "dependsOn": ["ResourceGroup"]
     },
-    "HealthCheck": {
-      "isEnabled": false,
-      "operationType": "HttpHealthCheck",
-      "parameters": {
-        "endpoint": "http://${VM_PUBLIC_IP}:22",
-        "expectedStatus": 200,
-        "maxRetries": 6,
-        "retryDelaySeconds": 10
-      },
-      "dependsOn": ["CreateVM"]
-    },
     "StopVM": {
-      "isEnabled": false,
+      "isEnabled": true,
       "operationType": "StopVM",
       "parameters": {
         "vmName": "cloudaura-vm",
@@ -61,7 +50,7 @@
       "dependsOn": ["CreateVM"]
     },
     "DeleteVM": {
-      "isEnabled": false,
+      "isEnabled": true,
       "operationType": "DeleteVM",
       "parameters": {
         "vmName": "cloudaura-vm",
@@ -69,6 +58,14 @@
         "deleteNetworking": true
       },
       "dependsOn": ["StopVM"]
+    },
+    "DeleteResourceGroup": {
+      "isEnabled": true,
+      "operationType": "DeleteResourceGroup",
+      "parameters": {
+        "resourceGroupName": "cloudaura-vm-rg"
+      },
+      "dependsOn": ["DeleteVM"]
     }
   }
 }
