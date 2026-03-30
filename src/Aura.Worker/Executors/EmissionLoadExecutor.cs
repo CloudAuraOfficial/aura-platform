@@ -2,6 +2,7 @@ using Aura.Core.Entities;
 using Aura.Core.Interfaces;
 using Aura.Core.Models;
 using Aura.Infrastructure.Services;
+using Aura.Worker.Operations;
 using Microsoft.Extensions.Logging;
 
 namespace Aura.Worker.Executors;
@@ -54,6 +55,9 @@ public class EmissionLoadExecutor : ILayerExecutor
         // Record the image used for audit
         layer.EmissionLoadImage = fullImageName;
 
+        // Resolve ${BYOS_*} references in parameters using BYOS credentials from envVars
+        var resolvedParameters = ByosResolver.Resolve(layer.Parameters, envVars);
+
         var request = new ContainerExecutionRequest(
             RunId: run.Id,
             LayerId: layer.Id,
@@ -61,7 +65,7 @@ public class EmissionLoadExecutor : ILayerExecutor
             EssenceJson: run.SnapshotJson,
             LayerName: layer.LayerName,
             OperationType: layer.OperationType,
-            Parameters: layer.Parameters,
+            Parameters: resolvedParameters,
             EnvVars: envVars);
 
         var result = await _containerService.ExecuteAsync(request, ct);

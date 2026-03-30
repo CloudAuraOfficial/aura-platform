@@ -65,9 +65,6 @@ public class DockerContainerExecutionService : IContainerExecutionService, IDisp
             if (!string.IsNullOrEmpty(request.OperationType))
                 envVars.Add($"AURA_OPERATION_TYPE={request.OperationType}");
 
-            // Build the layer command from operation type and parameters
-            envVars.Add($"AURA_LAYER_COMMAND={BuildLayerCommand(request)}");
-
             var createParams = new CreateContainerParameters
             {
                 Image = request.ImageName,
@@ -261,17 +258,6 @@ public class DockerContainerExecutionService : IContainerExecutionService, IDisp
         {
             _logger.LogWarning(ex, "Failed to remove container {ContainerId}", containerId);
         }
-    }
-
-    private static string BuildLayerCommand(ContainerExecutionRequest request)
-    {
-        // The container entrypoint reads AURA_LAYER_COMMAND and executes it.
-        // For operation-based layers, the command is constructed from the operation type.
-        // For script-based layers, this would be the script invocation.
-        if (!string.IsNullOrEmpty(request.OperationType))
-            return $"echo '[EmissionLoad] Executing operation: {request.OperationType}' && echo 'Parameters: {request.Parameters}'";
-
-        return "echo '[EmissionLoad] No operation type specified, running default handler'";
     }
 
     private static long ParseMemoryLimit(string limit)
