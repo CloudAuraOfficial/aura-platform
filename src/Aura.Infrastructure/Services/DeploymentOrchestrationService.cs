@@ -207,6 +207,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         "python" => ExecutorType.Python,
         "csharp_sdk" => ExecutorType.CSharpSdk,
         "operation" => ExecutorType.Operation,
+        "emissionload" => ExecutorType.EmissionLoad,
         _ => throw new InvalidOperationException($"Unknown executor type: {value}")
     };
 
