@@ -33,7 +33,9 @@ FROM build AS publish-worker
 RUN dotnet publish src/Aura.Worker/Aura.Worker.csproj -c Release -o /app/worker
 
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS worker
-RUN groupadd -r aura && useradd -r -g aura -s /sbin/nologin aura
+ARG DOCKER_GID=988
+RUN groupadd -r aura && useradd -r -g aura -s /sbin/nologin aura \
+    && groupadd -g ${DOCKER_GID} docker && usermod -aG docker aura
 WORKDIR /app
 COPY --from=publish-worker /app/worker .
 RUN chown -R aura:aura /app
