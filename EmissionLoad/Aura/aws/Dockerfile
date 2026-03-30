@@ -1,6 +1,6 @@
 FROM amazon/aws-cli:latest AS base
 
-RUN yum install -y jq curl bash && yum clean all
+RUN yum install -y jq bash shadow-utils && yum clean all
 
 WORKDIR /aura
 

@@ -1,13 +1,14 @@
 FROM mcr.microsoft.com/azure-cli:latest AS base
 
-RUN apk add --no-cache jq curl bash
+# jq, curl, bash already pre-installed on Azure Linux
+RUN tdnf install -y shadow-utils && tdnf clean all
 
 WORKDIR /aura
 
 COPY entrypoint.sh /aura/entrypoint.sh
 RUN chmod +x /aura/entrypoint.sh
 
-RUN adduser -D -s /bin/bash aura
+RUN useradd -m -s /bin/bash aura
 USER aura
 
 ENTRYPOINT ["/aura/entrypoint.sh"]
