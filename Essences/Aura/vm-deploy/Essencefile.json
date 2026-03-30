@@ -7,7 +7,8 @@
     "tenantId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
     "uniqueId": "cloudaura-vm",
     "baseLoad": "EmissionLoadVM",
-    "defaultRegion": "eastus"
+    "defaultRegion": "eastus",
+    "Schedule": "0 3 * * 1"
   },
   "layers": {
     "ResourceGroup": {

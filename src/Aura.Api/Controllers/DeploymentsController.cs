@@ -53,16 +53,21 @@ public class DeploymentsController : ControllerBase
     [Authorize(Roles = "Admin,Member")]
     public async Task<IActionResult> Create([FromBody] CreateDeploymentRequest request)
     {
-        var essenceExists = await _db.Essences.AnyAsync(e => e.Id == request.EssenceId);
-        if (!essenceExists)
+        var essence = await _db.Essences.FindAsync(request.EssenceId);
+        if (essence is null)
             return BadRequest(new ErrorResponse("bad_request", "Essence not found.", 400));
+
+        // Default cron from baseEssence.Schedule if not explicitly provided
+        var cronExpression = request.CronExpression;
+        if (string.IsNullOrEmpty(cronExpression))
+            cronExpression = ExtractScheduleFromEssence(essence.EssenceJson);
 
         var deployment = new Deployment
         {
             TenantId = _tenant.TenantId,
             EssenceId = request.EssenceId,
             Name = request.Name,
-            CronExpression = request.CronExpression,
+            CronExpression = cronExpression,
             WebhookUrl = request.WebhookUrl,
             IsEnabled = request.IsEnabled
         };
@@ -71,6 +76,25 @@ public class DeploymentsController : ControllerBase
         await _db.SaveChangesAsync();
 
         return CreatedAtAction(nameof(Get), new { id = deployment.Id }, ToDto(deployment));
+    }
+
+    private static string? ExtractScheduleFromEssence(string essenceJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(essenceJson);
+            if (doc.RootElement.TryGetProperty("baseEssence", out var baseEssence)
+                && baseEssence.TryGetProperty("Schedule", out var schedule))
+            {
+                var value = schedule.GetString();
+                return string.IsNullOrWhiteSpace(value) ? null : value;
+            }
+        }
+        catch
+        {
+            // Non-critical: essence JSON may not have baseEssence.Schedule
+        }
+        return null;
     }
 
     [HttpPut("{id:guid}")]
@@ -214,5 +238,5 @@ public class DeploymentsController : ControllerBase
     private static DeploymentLayerResponse ToLayerDto(DeploymentLayer l) =>
         new(l.Id, l.LayerName, l.ExecutorType.ToString(), l.Status.ToString(),
             l.Parameters, l.ScriptPath, l.DependsOn, l.SortOrder,
-            l.Output, l.StartedAt, l.CompletedAt);
+            l.Output, l.EmissionLoadImage, l.StartedAt, l.CompletedAt);
 }

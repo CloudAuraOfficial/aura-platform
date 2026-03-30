@@ -21,6 +21,7 @@ public sealed record DeploymentLayerResponse(
     string DependsOn,
     int SortOrder,
     string? Output,
+    string? EmissionLoadImage,
     DateTime? StartedAt,
     DateTime? CompletedAt
 );
