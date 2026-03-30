@@ -12,7 +12,7 @@ public class EssencefileParsingTests
         // Navigate from test bin directory up to the repo root
         var repoRoot = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var path = Path.Combine(repoRoot, "essences", "aci-deploy", "Essencefile.json");
+        var path = Path.Combine(repoRoot, "Essences", "Aura", "aci-deploy", "Essencefile.json");
         return File.ReadAllText(path);
     }
 
