@@ -283,9 +283,9 @@ YAMLEOF
 
     DeleteResourceGroup)
         RG_NAME=$(param "resourceGroupName")
-        echo "[EmissionLoad-Azure] Deleting resource group '$RG_NAME'..."
-        az group delete --name "$RG_NAME" --yes --no-wait --output none
-        echo "[EmissionLoad-Azure] Resource group deletion initiated (async)."
+        echo "[EmissionLoad-Azure] Deleting resource group '$RG_NAME' (waiting for completion)..."
+        az group delete --name "$RG_NAME" --yes --output none
+        echo "[EmissionLoad-Azure] Resource group deleted."
         ;;
 
     HttpHealthCheck)
