@@ -5,5 +5,6 @@ public enum ExecutorType
     PowerShell = 0,
     Python = 1,
     CSharpSdk = 2,
-    Operation = 3
+    Operation = 3,
+    EmissionLoad = 4
 }

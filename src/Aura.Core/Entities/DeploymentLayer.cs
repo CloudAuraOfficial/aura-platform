@@ -15,6 +15,7 @@ public class DeploymentLayer : BaseEntity
     public string DependsOn { get; set; } = "[]";
     public int SortOrder { get; set; }
     public string? Output { get; set; }
+    public string? EmissionLoadImage { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 }
