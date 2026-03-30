@@ -7,6 +7,7 @@ using Aura.Worker.Operations.Azure;
 using Aura.Worker.Operations.Common;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Prometheus;
 using StackExchange.Redis;
 
@@ -42,6 +43,12 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<PythonExecutor>();
     services.AddTransient<CSharpSdkExecutor>();
     services.AddTransient<OperationExecutor>();
+    services.AddTransient<EmissionLoadExecutor>();
+
+    // EmissionLoad container execution
+    services.AddSingleton<IContainerExecutionService, DockerContainerExecutionService>();
+    services.AddScoped<EmissionLoadResolver>();
+    services.AddSingleton<IExecutionModeStrategy, ExecutionModeStrategy>();
 
     // Operation handlers
     services.AddTransient<CreateResourceGroupHandler>();

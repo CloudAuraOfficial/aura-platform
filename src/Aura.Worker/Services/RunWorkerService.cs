@@ -11,6 +11,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Prometheus;
 
+// Aliases for clarity
+using ExecutionMode = Aura.Core.Enums.ExecutionMode;
+
 namespace Aura.Worker.Services;
 
 public class RunWorkerService : BackgroundService
@@ -168,7 +171,12 @@ public class RunWorkerService : BackgroundService
             await PublishLogSafe(logStream, runId,
                 $"[{layer.LayerName}] Running ({layer.ExecutorType})", ct);
 
-            var executor = ResolveExecutor(scope.ServiceProvider, layer.ExecutorType);
+            var modeStrategy = scope.ServiceProvider.GetRequiredService<IExecutionModeStrategy>();
+            var executionMode = modeStrategy.Resolve(run, layer);
+            var effectiveExecutorType = executionMode == ExecutionMode.EmissionLoadContainer
+                ? ExecutorType.EmissionLoad
+                : layer.ExecutorType;
+            var executor = ResolveExecutor(scope.ServiceProvider, effectiveExecutorType);
             try
             {
                 // Use a temp work directory for this run
@@ -375,6 +383,7 @@ public class RunWorkerService : BackgroundService
         ExecutorType.Python => sp.GetRequiredService<PythonExecutor>(),
         ExecutorType.CSharpSdk => sp.GetRequiredService<CSharpSdkExecutor>(),
         ExecutorType.Operation => sp.GetRequiredService<OperationExecutor>(),
+        ExecutorType.EmissionLoad => sp.GetRequiredService<EmissionLoadExecutor>(),
         _ => throw new InvalidOperationException($"Unknown executor type: {type}")
     };
 
