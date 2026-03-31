@@ -48,6 +48,8 @@ services:
       target: worker
     container_name: aura_worker
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:9091:9091"
     env_file: .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
