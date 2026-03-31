@@ -125,9 +125,12 @@ public class EmissionLoadParsingTests
 
         var layers = DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.NewGuid());
 
-        // 2 enabled layers (3 disabled: HealthCheck, StopVM, DeleteVM)
-        Assert.Equal(2, layers.Count);
+        // 5 enabled layers: full VM lifecycle
+        Assert.Equal(5, layers.Count);
         Assert.Equal("ResourceGroup", layers[0].LayerName);
         Assert.Equal("CreateVM", layers[1].LayerName);
+        Assert.Equal("StopVM", layers[2].LayerName);
+        Assert.Equal("DeleteVM", layers[3].LayerName);
+        Assert.Equal("DeleteResourceGroup", layers[4].LayerName);
     }
 }
