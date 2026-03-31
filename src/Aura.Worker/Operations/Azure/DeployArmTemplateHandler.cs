@@ -48,7 +48,7 @@ public class DeployArmTemplateHandler : IOperationHandler
             }
         }
 
-        var armParametersJson = JsonSerializer.Serialize(new { parameters = armParameters });
+        var armParametersJson = JsonSerializer.Serialize(armParameters);
 
         try
         {

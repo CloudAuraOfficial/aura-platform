@@ -7,7 +7,7 @@
     "tenantId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
     "uniqueId": "cloudaura-multi-vm",
     "baseLoad": "EmissionLoadVM",
-    "defaultRegion": "westus2"
+    "defaultRegion": "southcentralus"
   },
   "layers": {
     "CreateResourceGroup": {
@@ -16,7 +16,7 @@
       "operationType": "CreateResourceGroup",
       "parameters": {
         "resourceGroupName": "cloudaura-multi-vm-rg",
-        "location": "westus2"
+        "location": "southcentralus"
       },
       "_approach": "Azure CLI (via EmissionLoad container)"
     },
@@ -29,11 +29,12 @@
         "deploymentName": "multi-executor-vm-deploy",
         "templateParameters": {
           "vmName": "cloudaura-multi-vm",
-          "location": "westus2",
-          "vmSize": "Standard_B1s",
+          "location": "southcentralus",
+          "vmSize": "Standard_D2s_v3",
           "adminUsername": "azureuser",
           "adminPassword": "${BYOS_VM_ADMIN_PASSWORD}",
-          "osDiskSizeGB": 30
+          "osDiskSizeGB": 30,
+          "zone": "1"
         }
       },
       "dependsOn": ["CreateResourceGroup"],

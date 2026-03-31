@@ -9,6 +9,9 @@ public class OperationRegistry
         _handlers[operationType] = typeof(THandler);
     }
 
+    public bool HasHandler(string operationType) =>
+        _handlers.ContainsKey(operationType);
+
     public IOperationHandler Resolve(IServiceProvider sp, string operationType)
     {
         if (!_handlers.TryGetValue(operationType, out var handlerType))

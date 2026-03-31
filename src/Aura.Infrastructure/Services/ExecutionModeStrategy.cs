@@ -11,11 +11,14 @@ public class ExecutionModeStrategy : IExecutionModeStrategy
 {
     private readonly string _configuredMode;
     private readonly ILogger<ExecutionModeStrategy> _logger;
+    private readonly Func<string, bool>? _hasInProcessHandler;
 
-    public ExecutionModeStrategy(IConfiguration config, ILogger<ExecutionModeStrategy> logger)
+    public ExecutionModeStrategy(IConfiguration config, ILogger<ExecutionModeStrategy> logger,
+        Func<string, bool>? hasInProcessHandler = null)
     {
         _configuredMode = config["EXECUTION_MODE"] ?? "InProcess";
         _logger = logger;
+        _hasInProcessHandler = hasInProcessHandler;
     }
 
     public ExecutionMode Resolve(DeploymentRun run, DeploymentLayer layer)
@@ -38,21 +41,34 @@ public class ExecutionModeStrategy : IExecutionModeStrategy
         return mode;
     }
 
-    private static ExecutionMode ResolveEmissionLoad(DeploymentRun run, DeploymentLayer layer)
+    private ExecutionMode ResolveEmissionLoad(DeploymentRun run, DeploymentLayer layer)
     {
-        // In EmissionLoad mode, all Operation-type layers go to containers.
-        // Script executors (PowerShell, Python, CSharp) stay in-process for now
-        // since they need local file access for script paths.
-        return layer.ExecutorType == ExecutorType.Operation
-            ? ExecutionMode.EmissionLoadContainer
-            : ExecutionMode.InProcess;
+        // Script executors stay in-process (need local file access for script paths)
+        if (layer.ExecutorType != ExecutorType.Operation)
+            return ExecutionMode.InProcess;
+
+        // If an in-process handler is registered for this operation type,
+        // prefer in-process execution over EmissionLoad container
+        if (_hasInProcessHandler != null && !string.IsNullOrEmpty(layer.OperationType)
+            && _hasInProcessHandler(layer.OperationType))
+        {
+            _logger.LogInformation(
+                "Operation {OperationType} has in-process handler, using InProcess instead of EmissionLoad",
+                layer.OperationType);
+            return ExecutionMode.InProcess;
+        }
+
+        return ExecutionMode.EmissionLoadContainer;
     }
 
-    private static ExecutionMode ResolveAuto(DeploymentRun run, DeploymentLayer layer)
+    private ExecutionMode ResolveAuto(DeploymentRun run, DeploymentLayer layer)
     {
-        // Auto mode: check if the snapshot has a baseLoad field,
-        // and the layer is an Operation type
         if (layer.ExecutorType != ExecutorType.Operation)
+            return ExecutionMode.InProcess;
+
+        // If an in-process handler is registered, prefer it
+        if (_hasInProcessHandler != null && !string.IsNullOrEmpty(layer.OperationType)
+            && _hasInProcessHandler(layer.OperationType))
             return ExecutionMode.InProcess;
 
         if (string.IsNullOrEmpty(run.SnapshotJson))

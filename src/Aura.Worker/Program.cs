@@ -48,7 +48,6 @@ builder.ConfigureServices((context, services) =>
     // EmissionLoad container execution
     services.AddSingleton<IContainerExecutionService, DockerContainerExecutionService>();
     services.AddScoped<EmissionLoadResolver>();
-    services.AddSingleton<IExecutionModeStrategy, ExecutionModeStrategy>();
 
     // Operation handlers
     services.AddTransient<CreateResourceGroupHandler>();
@@ -84,6 +83,13 @@ builder.ConfigureServices((context, services) =>
     registry.Register<DeleteVMHandler>("DeleteVM");
     registry.Register<DeployArmTemplateHandler>("DeployArmTemplate");
     services.AddSingleton(registry);
+
+    // Execution mode strategy (with in-process handler awareness)
+    services.AddSingleton<IExecutionModeStrategy>(sp =>
+        new ExecutionModeStrategy(
+            sp.GetRequiredService<IConfiguration>(),
+            sp.GetRequiredService<ILogger<ExecutionModeStrategy>>(),
+            operationType => registry.HasHandler(operationType)));
 
     // Redis + log streaming
     var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "localhost";
