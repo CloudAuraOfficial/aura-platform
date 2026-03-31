@@ -37,6 +37,20 @@ public class RunWorkerService : BackgroundService
         "aura_queue_depth", "Queued runs count");
     private static readonly Counter StaleReaped = Metrics.CreateCounter(
         "aura_stale_runs_reaped_total", "Stale runs reaped");
+    private static readonly Histogram LayerDuration = Metrics.CreateHistogram(
+        "aura_layer_duration_seconds", "Per-layer execution duration",
+        new HistogramConfiguration
+        {
+            LabelNames = new[] { "executor_type", "layer_name", "operation_type" },
+            Buckets = Histogram.ExponentialBuckets(1, 2, 12)
+        });
+    private static readonly Histogram OperationTypeDuration = Metrics.CreateHistogram(
+        "aura_operation_type_duration_seconds", "Duration by operation type",
+        new HistogramConfiguration
+        {
+            LabelNames = new[] { "operation_type" },
+            Buckets = Histogram.ExponentialBuckets(1, 2, 12)
+        });
 
     public RunWorkerService(IServiceScopeFactory scopeFactory, ILogger<RunWorkerService> logger)
     {
@@ -177,6 +191,7 @@ public class RunWorkerService : BackgroundService
                 ? ExecutorType.EmissionLoad
                 : layer.ExecutorType;
             var executor = ResolveExecutor(scope.ServiceProvider, effectiveExecutorType);
+            var layerStopwatch = Stopwatch.StartNew();
             try
             {
                 // Use a temp work directory for this run
@@ -189,6 +204,17 @@ public class RunWorkerService : BackgroundService
                 layer.Status = result.Success ? LayerStatus.Succeeded : LayerStatus.Failed;
                 layer.CompletedAt = DateTime.UtcNow;
                 LayersExecuted.WithLabels(layer.ExecutorType.ToString(), layer.Status.ToString()).Inc();
+
+                // Observe per-layer and per-operation-type duration
+                layerStopwatch.Stop();
+                var opType = layer.Parameters?.Contains("operationType")== true
+                    ? ExtractOperationType(layer.Parameters) : "";
+                LayerDuration.WithLabels(
+                    effectiveExecutorType.ToString(), layer.LayerName, opType)
+                    .Observe(layerStopwatch.Elapsed.TotalSeconds);
+                if (!string.IsNullOrEmpty(opType))
+                    OperationTypeDuration.WithLabels(opType)
+                        .Observe(layerStopwatch.Elapsed.TotalSeconds);
 
                 // Stream output lines to subscribers
                 if (!string.IsNullOrEmpty(result.Output))
@@ -214,6 +240,16 @@ public class RunWorkerService : BackgroundService
             }
             catch (Exception ex)
             {
+                layerStopwatch.Stop();
+                var opType = layer.Parameters?.Contains("operationType") == true
+                    ? ExtractOperationType(layer.Parameters) : "";
+                LayerDuration.WithLabels(
+                    effectiveExecutorType.ToString(), layer.LayerName, opType)
+                    .Observe(layerStopwatch.Elapsed.TotalSeconds);
+                if (!string.IsNullOrEmpty(opType))
+                    OperationTypeDuration.WithLabels(opType)
+                        .Observe(layerStopwatch.Elapsed.TotalSeconds);
+
                 layer.Output = TruncateOutput(ex.Message);
                 layer.Status = LayerStatus.Failed;
                 layer.CompletedAt = DateTime.UtcNow;
@@ -386,6 +422,18 @@ public class RunWorkerService : BackgroundService
         ExecutorType.EmissionLoad => sp.GetRequiredService<EmissionLoadExecutor>(),
         _ => throw new InvalidOperationException($"Unknown executor type: {type}")
     };
+
+    private static string ExtractOperationType(string? parametersJson)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(parametersJson)) return "";
+            using var doc = JsonDocument.Parse(parametersJson);
+            return doc.RootElement.TryGetProperty("operationType", out var ot)
+                ? ot.GetString() ?? "" : "";
+        }
+        catch { return ""; }
+    }
 
     private static string TruncateOutput(string? output, int maxLength = 50_000)
     {

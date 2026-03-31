@@ -6,6 +6,7 @@ using Docker.DotNet;
 using Docker.DotNet.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Prometheus;
 
 namespace Aura.Infrastructure.Services;
 
@@ -17,6 +18,20 @@ public class DockerContainerExecutionService : IContainerExecutionService, IDisp
     private readonly string _memoryLimit;
     private readonly long _cpuLimit;
     private readonly TimeSpan _defaultTimeout;
+
+    private static readonly Histogram ContainerDuration = Metrics.CreateHistogram(
+        "aura_emissionload_container_duration_seconds", "Container total execution time",
+        new HistogramConfiguration
+        {
+            LabelNames = new[] { "operation_type", "exit_code" },
+            Buckets = Histogram.ExponentialBuckets(1, 2, 12)
+        });
+    private static readonly Histogram ContainerStartup = Metrics.CreateHistogram(
+        "aura_emissionload_container_startup_seconds", "Container create-to-start latency",
+        new HistogramConfiguration { Buckets = Histogram.ExponentialBuckets(0.1, 2, 10) });
+    private static readonly Counter ContainerExecutions = Metrics.CreateCounter(
+        "aura_emissionload_container_executions_total", "Container execution outcomes",
+        new CounterConfiguration { LabelNames = new[] { "result" } });
 
     public DockerContainerExecutionService(
         ILogStreamService logStream,
@@ -87,12 +102,15 @@ public class DockerContainerExecutionService : IContainerExecutionService, IDisp
             };
 
             // Create and start the container
+            var startupSw = Stopwatch.StartNew();
             var createResponse = await _docker.Containers.CreateContainerAsync(createParams, ct);
             var containerId = createResponse.ID;
 
             _logger.LogInformation("Created container {ContainerId} for {ContainerName}", containerId, containerName);
 
             await _docker.Containers.StartContainerAsync(containerId, new ContainerStartParameters(), ct);
+            startupSw.Stop();
+            ContainerStartup.Observe(startupSw.Elapsed.TotalSeconds);
 
             // Stream logs to Redis in real time
             var output = await StreamLogsAsync(containerId, request.RunId, request.LayerName, timeout, ct);
@@ -113,6 +131,8 @@ public class DockerContainerExecutionService : IContainerExecutionService, IDisp
                 await _docker.Containers.KillContainerAsync(containerId, new ContainerKillParameters(), CancellationToken.None);
                 await CleanupContainerAsync(containerId);
                 sw.Stop();
+                ContainerDuration.WithLabels(request.OperationType ?? "", "-1").Observe(sw.Elapsed.TotalSeconds);
+                ContainerExecutions.WithLabels("timeout").Inc();
 
                 return new ContainerExecutionResult(
                     Success: false,
@@ -130,6 +150,9 @@ public class DockerContainerExecutionService : IContainerExecutionService, IDisp
             sw.Stop();
 
             var exitCode = (int)waitResponse.StatusCode;
+            ContainerDuration.WithLabels(request.OperationType ?? "", exitCode.ToString()).Observe(sw.Elapsed.TotalSeconds);
+            ContainerExecutions.WithLabels(exitCode == 0 ? "success" : "failure").Inc();
+
             _logger.LogInformation(
                 "Container {ContainerId} exited with code {ExitCode} in {Duration}ms",
                 containerId, exitCode, sw.ElapsedMilliseconds);
@@ -143,6 +166,8 @@ public class DockerContainerExecutionService : IContainerExecutionService, IDisp
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             sw.Stop();
+            ContainerDuration.WithLabels(request.OperationType ?? "", "-1").Observe(sw.Elapsed.TotalSeconds);
+            ContainerExecutions.WithLabels("failure").Inc();
             _logger.LogError(ex, "EmissionLoad container execution failed for run {RunId} layer {LayerName}",
                 request.RunId, request.LayerName);
 

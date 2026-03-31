@@ -22,6 +22,8 @@ public class DeploymentSchedulerService : BackgroundService
 
     private static readonly Counter ScheduledRuns = Metrics.CreateCounter(
         "aura_scheduled_runs_total", "Cron-triggered runs created");
+    private static readonly Gauge LastEvaluation = Metrics.CreateGauge(
+        "aura_scheduler_last_evaluation_timestamp", "Unix timestamp of last cron evaluation");
 
     public DeploymentSchedulerService(
         IServiceScopeFactory scopeFactory,
@@ -67,6 +69,7 @@ public class DeploymentSchedulerService : BackgroundService
         var orchestration = scope.ServiceProvider.GetRequiredService<IDeploymentOrchestrationService>();
 
         var now = DateTime.UtcNow;
+        LastEvaluation.Set(new DateTimeOffset(now).ToUnixTimeSeconds());
         var minuteFloor = FloorToMinute(now);
 
         // Fetch all enabled deployments that have a cron expression

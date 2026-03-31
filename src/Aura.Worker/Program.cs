@@ -103,8 +103,8 @@ builder.ConfigureServices((context, services) =>
 
 var host = builder.Build();
 
-// Expose Prometheus metrics on port 9090 for scraping
-var metricsServer = new MetricServer(port: 9090);
+// Expose Prometheus metrics on port 9091 (9090 is used by P3 Prometheus)
+var metricsServer = new MetricServer(port: 9091);
 metricsServer.Start();
 
 await host.RunAsync();
