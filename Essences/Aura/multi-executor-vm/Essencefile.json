@@ -1,0 +1,74 @@
+{
+  "baseEssence": {
+    "EssenceName": "MultiExecutorVM",
+    "EssenceID": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+    "cloudProvider": "Azure",
+    "subscriptionId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "tenantId": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+    "uniqueId": "cloudaura-multi-vm",
+    "baseLoad": "EmissionLoadVM",
+    "defaultRegion": "westus2"
+  },
+  "layers": {
+    "CreateResourceGroup": {
+      "isEnabled": true,
+      "executorType": "emissionload",
+      "operationType": "CreateResourceGroup",
+      "parameters": {
+        "resourceGroupName": "cloudaura-multi-vm-rg",
+        "location": "westus2"
+      },
+      "_approach": "Azure CLI (via EmissionLoad container)"
+    },
+    "DeployVM": {
+      "isEnabled": true,
+      "operationType": "DeployArmTemplate",
+      "parameters": {
+        "resourceGroup": "cloudaura-multi-vm-rg",
+        "templatePath": "/app/templates/vm-arm-template.json",
+        "deploymentName": "multi-executor-vm-deploy",
+        "templateParameters": {
+          "vmName": "cloudaura-multi-vm",
+          "location": "westus2",
+          "vmSize": "Standard_B1s",
+          "adminUsername": "azureuser",
+          "adminPassword": "${BYOS_VM_ADMIN_PASSWORD}",
+          "osDiskSizeGB": 30
+        }
+      },
+      "dependsOn": ["CreateResourceGroup"],
+      "_approach": "ARM Template (via Azure SDK deployment API)"
+    },
+    "StopVM": {
+      "isEnabled": true,
+      "operationType": "StopVM",
+      "parameters": {
+        "vmName": "cloudaura-multi-vm",
+        "resourceGroup": "cloudaura-multi-vm-rg"
+      },
+      "dependsOn": ["DeployVM"],
+      "_approach": "Azure SDK C# (Azure.ResourceManager.Compute)"
+    },
+    "DeleteVM": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "/app/scripts/delete-vm.ps1",
+      "parameters": {
+        "vmName": "cloudaura-multi-vm",
+        "resourceGroup": "cloudaura-multi-vm-rg"
+      },
+      "dependsOn": ["StopVM"],
+      "_approach": "Azure PowerShell (Az.Compute module)"
+    },
+    "DeleteResourceGroup": {
+      "isEnabled": true,
+      "executorType": "emissionload",
+      "operationType": "DeleteResourceGroup",
+      "parameters": {
+        "resourceGroupName": "cloudaura-multi-vm-rg"
+      },
+      "dependsOn": ["DeleteVM"],
+      "_approach": "Azure CLI (via EmissionLoad container)"
+    }
+  }
+}

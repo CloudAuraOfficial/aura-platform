@@ -64,6 +64,7 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<StartVMHandler>();
     services.AddTransient<StopVMHandler>();
     services.AddTransient<DeleteVMHandler>();
+    services.AddTransient<DeployArmTemplateHandler>();
     services.AddHttpClient();
 
     // Operation registry
@@ -81,6 +82,7 @@ builder.ConfigureServices((context, services) =>
     registry.Register<StartVMHandler>("StartVM");
     registry.Register<StopVMHandler>("StopVM");
     registry.Register<DeleteVMHandler>("DeleteVM");
+    registry.Register<DeployArmTemplateHandler>("DeployArmTemplate");
     services.AddSingleton(registry);
 
     // Redis + log streaming

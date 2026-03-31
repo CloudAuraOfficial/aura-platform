@@ -36,8 +36,29 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS worker
 ARG DOCKER_GID=988
 RUN groupadd -r aura && useradd -r -g aura -s /sbin/nologin aura \
     && groupadd -g ${DOCKER_GID} docker && usermod -aG docker aura
+
+# Install PowerShell Core
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends wget apt-transport-https \
+    && wget -q https://packages.microsoft.com/config/debian/12/packages-microsoft-prod.deb \
+    && dpkg -i packages-microsoft-prod.deb \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends powershell \
+    && rm -rf /var/lib/apt/lists/* packages-microsoft-prod.deb
+
+# Install Az PowerShell modules for multi-executor support
+RUN pwsh -Command "Set-PSRepository PSGallery -InstallationPolicy Trusted" \
+    && pwsh -Command "Install-Module -Name Az.Accounts -Scope AllUsers -Force" \
+    && pwsh -Command "Install-Module -Name Az.Compute -Scope AllUsers -Force" \
+    && pwsh -Command "Install-Module -Name Az.Network -Scope AllUsers -Force"
+
 WORKDIR /app
 COPY --from=publish-worker /app/worker .
+
+# Copy multi-executor scripts and templates
+COPY Essences/Aura/multi-executor-vm/scripts/ /app/scripts/
+COPY Essences/Aura/multi-executor-vm/templates/ /app/templates/
+
 RUN chown -R aura:aura /app
 USER aura
 ENTRYPOINT ["dotnet", "Aura.Worker.dll"]
