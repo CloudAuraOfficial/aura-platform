@@ -100,37 +100,85 @@ public class EmissionLoadParsingTests
         Assert.Contains("containerGroupName", layer.Parameters);
     }
 
-    [Fact]
-    public void Essencefile_Aura_AciDeploy_StillParsesCorrectly()
+    /// <summary>
+    /// Discovers all Essencefiles under Essences/ and validates structural correctness.
+    /// Adding a new customer folder with an Essencefile automatically includes it.
+    /// </summary>
+    public static IEnumerable<object[]> AllEssencefiles()
     {
         var repoRoot = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var path = Path.Combine(repoRoot, "Essences", "Aura", "aci-deploy", "Essencefile.json");
-        var json = File.ReadAllText(path);
+        var essencesDir = Path.Combine(repoRoot, "Essences");
+        if (!Directory.Exists(essencesDir))
+            yield break;
 
-        var layers = DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.NewGuid());
-
-        // 9 enabled layers (2 disabled: StopContainerGroup, DeleteContainerGroup)
-        Assert.Equal(9, layers.Count);
-        Assert.All(layers, l => Assert.Equal(ExecutorType.Operation, l.ExecutorType));
+        foreach (var file in Directory.GetFiles(essencesDir, "Essencefile.json", SearchOption.AllDirectories))
+        {
+            // Use relative path from Essences/ as the display name
+            var relativePath = Path.GetRelativePath(essencesDir, file);
+            yield return new object[] { file, relativePath };
+        }
     }
 
-    [Fact]
-    public void Essencefile_Aura_VmDeploy_StillParsesCorrectly()
+    [Theory]
+    [MemberData(nameof(AllEssencefiles))]
+    public void Essencefile_ParsesCorrectly(string filePath, string displayName)
     {
-        var repoRoot = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-        var path = Path.Combine(repoRoot, "Essences", "Aura", "vm-deploy", "Essencefile.json");
-        var json = File.ReadAllText(path);
+        var json = File.ReadAllText(filePath);
 
+        // 1. Parsing succeeds
         var layers = DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.NewGuid());
 
-        // 5 enabled layers: full VM lifecycle
-        Assert.Equal(5, layers.Count);
-        Assert.Equal("ResourceGroup", layers[0].LayerName);
-        Assert.Equal("CreateVM", layers[1].LayerName);
-        Assert.Equal("StopVM", layers[2].LayerName);
-        Assert.Equal("DeleteVM", layers[3].LayerName);
-        Assert.Equal("DeleteResourceGroup", layers[4].LayerName);
+        // 2. Count matches enabled layers in source JSON
+        var expectedCount = CountEnabledLayers(json);
+        Assert.Equal(expectedCount, layers.Count);
+
+        // 3. Every layer has a non-empty name
+        Assert.All(layers, l => Assert.False(
+            string.IsNullOrWhiteSpace(l.LayerName),
+            $"Layer at SortOrder {l.SortOrder} has empty name in {displayName}"));
+
+        // 4. Every layer has a valid ExecutorType
+        Assert.All(layers, l => Assert.True(
+            Enum.IsDefined(typeof(ExecutorType), l.ExecutorType),
+            $"Layer '{l.LayerName}' has undefined ExecutorType {l.ExecutorType} in {displayName}"));
+
+        // 5. Sort order is sequential starting from 0
+        for (var i = 0; i < layers.Count; i++)
+            Assert.Equal(i, layers[i].SortOrder);
+
+        // 6. Dependencies reference layers that exist in the parsed result
+        var layerNames = layers.Select(l => l.LayerName).ToHashSet();
+        foreach (var layer in layers)
+        {
+            var deps = JsonSerializer.Deserialize<List<string>>(layer.DependsOn) ?? [];
+            foreach (var dep in deps)
+                Assert.Contains(dep, layerNames);
+        }
+
+        // 7. All layers start in Pending status
+        Assert.All(layers, l => Assert.Equal(LayerStatus.Pending, l.Status));
+
+        // 8. Parameters is valid JSON
+        Assert.All(layers, l =>
+        {
+            var ex = Record.Exception(() => JsonDocument.Parse(l.Parameters));
+            Assert.Null(ex);
+        });
+    }
+
+    private static int CountEnabledLayers(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("layers", out var layers))
+            return 0;
+
+        var count = 0;
+        foreach (var prop in layers.EnumerateObject())
+        {
+            if (prop.Value.TryGetProperty("isEnabled", out var enabled) && enabled.GetBoolean())
+                count++;
+        }
+        return count;
     }
 }
