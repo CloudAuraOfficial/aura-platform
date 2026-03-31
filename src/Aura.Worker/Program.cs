@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
@@ -8,10 +9,18 @@ using Aura.Worker.Operations.Common;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Prometheus;
 using StackExchange.Redis;
 
 var builder = Host.CreateDefaultBuilder(args);
+
+builder.ConfigureLogging(logging =>
+{
+    logging.Configure(opts => opts.ActivityTrackingOptions =
+        ActivityTrackingOptions.TraceId | ActivityTrackingOptions.SpanId);
+});
 
 builder.ConfigureServices((context, services) =>
 {
@@ -90,6 +99,21 @@ builder.ConfigureServices((context, services) =>
             sp.GetRequiredService<IConfiguration>(),
             sp.GetRequiredService<ILogger<ExecutionModeStrategy>>(),
             operationType => registry.HasHandler(operationType)));
+
+    // OpenTelemetry tracing
+    var otelEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT") ?? "http://localhost:4317";
+    services.AddOpenTelemetry()
+        .WithTracing(tracing => tracing
+            .SetResourceBuilder(ResourceBuilder.CreateDefault()
+                .AddService("aura-worker", serviceVersion: "1.0.0"))
+            .AddHttpClientInstrumentation()
+            .AddEntityFrameworkCoreInstrumentation()
+            .AddSource("Aura.Worker")
+            .AddSource("Aura.Worker.Operations")
+            .AddOtlpExporter(opts =>
+            {
+                opts.Endpoint = new Uri(otelEndpoint);
+            }));
 
     // Redis + log streaming
     var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "localhost";

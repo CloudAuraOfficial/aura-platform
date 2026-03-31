@@ -11,5 +11,10 @@ public class DeploymentRun : TenantScopedEntity
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 
+    /// <summary>
+    /// W3C traceparent header for distributed trace propagation across the DB queue boundary.
+    /// </summary>
+    public string? TraceParent { get; set; }
+
     public ICollection<DeploymentLayer> Layers { get; set; } = new List<DeploymentLayer>();
 }

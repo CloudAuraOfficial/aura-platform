@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Threading.RateLimiting;
 using Aura.Api.Middleware;
@@ -10,6 +11,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 using Prometheus;
 using StackExchange.Redis;
 
@@ -115,6 +118,28 @@ var redisPort = Environment.GetEnvironmentVariable("REDIS_PORT") ?? "6379";
 builder.Services.AddSingleton<IConnectionMultiplexer>(
     ConnectionMultiplexer.Connect($"{redisHost}:{redisPort},abortConnect=false"));
 builder.Services.AddSingleton<ILogStreamService, RedisLogStreamService>();
+
+// OpenTelemetry tracing
+var otelEndpoint = Environment.GetEnvironmentVariable("OTEL_EXPORTER_OTLP_ENDPOINT") ?? "http://localhost:4317";
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .SetResourceBuilder(ResourceBuilder.CreateDefault()
+            .AddService("aura-api", serviceVersion: "1.0.0"))
+        .AddAspNetCoreInstrumentation(opts =>
+        {
+            opts.Filter = ctx => !ctx.Request.Path.StartsWithSegments("/metrics")
+                               && !ctx.Request.Path.StartsWithSegments("/health");
+        })
+        .AddHttpClientInstrumentation()
+        .AddEntityFrameworkCoreInstrumentation()
+        .AddOtlpExporter(opts =>
+        {
+            opts.Endpoint = new Uri(otelEndpoint);
+        }));
+
+// Correlate logs with trace/span IDs
+builder.Logging.Configure(opts => opts.ActivityTrackingOptions =
+    ActivityTrackingOptions.TraceId | ActivityTrackingOptions.SpanId);
 
 builder.Services.AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(

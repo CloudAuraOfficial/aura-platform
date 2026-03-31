@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
@@ -35,7 +36,8 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
             TenantId = deployment.TenantId,
             DeploymentId = deployment.Id,
             Status = RunStatus.Queued,
-            SnapshotJson = snapshotJson
+            SnapshotJson = snapshotJson,
+            TraceParent = Activity.Current?.Id
         };
         _db.DeploymentRuns.Add(run);
 

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Aura.Core.Entities;
 using Aura.Worker.Operations;
@@ -7,6 +8,8 @@ namespace Aura.Worker.Executors;
 
 public class OperationExecutor : ILayerExecutor
 {
+    private static readonly ActivitySource Source = new("Aura.Worker.Operations");
+
     private readonly IServiceProvider _serviceProvider;
     private readonly OperationRegistry _registry;
     private readonly ILogger<OperationExecutor> _logger;
@@ -53,6 +56,10 @@ public class OperationExecutor : ILayerExecutor
 
         try
         {
+            using var activity = Source.StartActivity($"Operation:{operationType}");
+            activity?.SetTag("operation.type", operationType);
+            activity?.SetTag("operation.layer", layer.LayerName);
+
             var handler = _registry.Resolve(_serviceProvider, operationType);
 
             // Resolve ${BYOS_*} references in parameters using credentials from envVars
@@ -62,7 +69,10 @@ public class OperationExecutor : ILayerExecutor
             using var doc = JsonDocument.Parse(resolvedParams);
             parameters = doc.RootElement.Clone();
 
-            return await handler.ExecuteAsync(layer.LayerName, parameters, envVars, ct);
+            var result = await handler.ExecuteAsync(layer.LayerName, parameters, envVars, ct);
+            if (!result.Success)
+                activity?.SetStatus(ActivityStatusCode.Error, result.Output?[..Math.Min(200, result.Output?.Length ?? 0)]);
+            return result;
         }
         catch (InvalidOperationException ex)
         {

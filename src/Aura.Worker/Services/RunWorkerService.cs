@@ -18,6 +18,8 @@ namespace Aura.Worker.Services;
 
 public class RunWorkerService : BackgroundService
 {
+    private static readonly ActivitySource WorkerSource = new("Aura.Worker");
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<RunWorkerService> _logger;
     private readonly SemaphoreSlim _semaphore;
@@ -153,6 +155,16 @@ public class RunWorkerService : BackgroundService
         if (run is null || run.Status != RunStatus.Queued)
             return;
 
+        // Restore trace context from the API-side trace that created this run
+        ActivityContext parentContext = default;
+        if (!string.IsNullOrEmpty(run.TraceParent))
+            ActivityContext.TryParse(run.TraceParent, null, out parentContext);
+
+        using var activity = WorkerSource.StartActivity("ProcessRun", ActivityKind.Consumer, parentContext);
+        activity?.SetTag("deployment.run_id", runId.ToString());
+        activity?.SetTag("deployment.id", run.DeploymentId.ToString());
+        activity?.SetTag("deployment.layer_count", run.Layers.Count);
+
         // Claim the run
         run.Status = RunStatus.Running;
         run.StartedAt = DateTime.UtcNow;
@@ -191,6 +203,14 @@ public class RunWorkerService : BackgroundService
                 ? ExecutorType.EmissionLoad
                 : layer.ExecutorType;
             var executor = ResolveExecutor(scope.ServiceProvider, effectiveExecutorType);
+
+            var opType = layer.Parameters?.Contains("operationType") == true
+                ? ExtractOperationType(layer.Parameters) : "";
+            using var layerActivity = WorkerSource.StartActivity($"ExecuteLayer:{layer.LayerName}");
+            layerActivity?.SetTag("layer.name", layer.LayerName);
+            layerActivity?.SetTag("layer.executor_type", effectiveExecutorType.ToString());
+            layerActivity?.SetTag("layer.operation_type", opType);
+
             var layerStopwatch = Stopwatch.StartNew();
             try
             {
@@ -203,12 +223,13 @@ public class RunWorkerService : BackgroundService
                 layer.Output = TruncateOutput(result.Output);
                 layer.Status = result.Success ? LayerStatus.Succeeded : LayerStatus.Failed;
                 layer.CompletedAt = DateTime.UtcNow;
+                layerActivity?.SetTag("layer.status", layer.Status.ToString());
+                if (!result.Success)
+                    layerActivity?.SetStatus(ActivityStatusCode.Error, result.Output?[..Math.Min(200, result.Output?.Length ?? 0)]);
                 LayersExecuted.WithLabels(layer.ExecutorType.ToString(), layer.Status.ToString()).Inc();
 
                 // Observe per-layer and per-operation-type duration
                 layerStopwatch.Stop();
-                var opType = layer.Parameters?.Contains("operationType")== true
-                    ? ExtractOperationType(layer.Parameters) : "";
                 LayerDuration.WithLabels(
                     effectiveExecutorType.ToString(), layer.LayerName, opType)
                     .Observe(layerStopwatch.Elapsed.TotalSeconds);
@@ -241,8 +262,6 @@ public class RunWorkerService : BackgroundService
             catch (Exception ex)
             {
                 layerStopwatch.Stop();
-                var opType = layer.Parameters?.Contains("operationType") == true
-                    ? ExtractOperationType(layer.Parameters) : "";
                 LayerDuration.WithLabels(
                     effectiveExecutorType.ToString(), layer.LayerName, opType)
                     .Observe(layerStopwatch.Elapsed.TotalSeconds);
@@ -253,6 +272,8 @@ public class RunWorkerService : BackgroundService
                 layer.Output = TruncateOutput(ex.Message);
                 layer.Status = LayerStatus.Failed;
                 layer.CompletedAt = DateTime.UtcNow;
+                layerActivity?.SetTag("layer.status", "Failed");
+                layerActivity?.SetStatus(ActivityStatusCode.Error, ex.Message[..Math.Min(200, ex.Message.Length)]);
                 failed = true;
                 _logger.LogError(ex, "Layer {Layer} threw in run {RunId}", layer.LayerName, runId);
                 await PublishLogSafe(logStream, runId,
@@ -264,6 +285,9 @@ public class RunWorkerService : BackgroundService
 
         run.Status = failed ? RunStatus.Failed : RunStatus.Succeeded;
         run.CompletedAt = DateTime.UtcNow;
+        activity?.SetTag("deployment.status", run.Status.ToString());
+        if (failed)
+            activity?.SetStatus(ActivityStatusCode.Error, "One or more layers failed");
         await db.SaveChangesAsync(ct);
 
         runStopwatch.Stop();

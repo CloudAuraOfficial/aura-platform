@@ -16,7 +16,7 @@ public class RequestLoggingMiddleware
     public async Task InvokeAsync(HttpContext context)
     {
         var sw = Stopwatch.StartNew();
-        var requestId = Guid.NewGuid().ToString("N")[..12];
+        var requestId = Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N")[..12];
         context.Items["RequestId"] = requestId;
 
         try
