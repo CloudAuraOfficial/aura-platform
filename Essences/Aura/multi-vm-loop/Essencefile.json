@@ -1,7 +1,7 @@
 {
   "baseEssence": {
     "cloudProvider": "Azure",
-    "defaultRegion": "eastus",
+    "defaultRegion": "southcentralus",
     "baseLoad": "EmissionLoadVM",
     "uniqueId": "aura-multi-vm-loop",
     "subscriptionId": ""
@@ -12,7 +12,7 @@
       "operationType": "CreateResourceGroup",
       "parameters": {
         "resourceGroupName": "aura-multi-vm-rg",
-        "location": "eastus"
+        "location": "southcentralus"
       },
       "_approach": "Create the resource group for all VMs"
     },
@@ -28,11 +28,12 @@
           "vmNamePrefix": "AuraVM",
           "parallelCount": 2,
           "sequentialCount": 2,
-          "location": "eastus",
-          "vmSize": "Standard_B1s",
+          "location": "southcentralus",
+          "vmSize": "Standard_D2s_v3",
           "adminUsername": "azureuser",
           "adminPassword": "${BYOS_VM_ADMIN_PASSWORD}",
-          "osDiskSizeGB": 30
+          "osDiskSizeGB": 30,
+          "zone": "1"
         }
       },
       "_approach": "Deploy 4 VMs via ARM copy loop: 2 parallel x 2 sequential. Batch 1: AuraVM_0_0 + AuraVM_1_0. Batch 2: AuraVM_0_1 + AuraVM_1_1."

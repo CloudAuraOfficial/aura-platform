@@ -9,7 +9,8 @@
     "vmSize": { "type": "string", "defaultValue": "Standard_B1s" },
     "adminUsername": { "type": "string", "defaultValue": "azureuser" },
     "adminPassword": { "type": "securestring" },
-    "osDiskSizeGB": { "type": "int", "defaultValue": 30 }
+    "osDiskSizeGB": { "type": "int", "defaultValue": 30 },
+    "zone": { "type": "string", "defaultValue": "", "metadata": { "description": "Availability zone (empty for no zone)" } }
   },
   "variables": {
     "totalVMs": "[mul(parameters('parallelCount'), parameters('sequentialCount'))]",
@@ -63,6 +64,7 @@
       "name": "[concat(parameters('vmNamePrefix'), '_', mod(copyIndex(), parameters('parallelCount')), '_', div(copyIndex(), parameters('parallelCount')), '-ip')]",
       "location": "[parameters('location')]",
       "sku": { "name": "Standard" },
+      "zones": "[if(empty(parameters('zone')), json('null'), array(parameters('zone')))]",
       "properties": { "publicIPAllocationMethod": "Static" },
       "copy": {
         "name": "pipLoop",
@@ -110,6 +112,7 @@
       "apiVersion": "2023-09-01",
       "name": "[concat(parameters('vmNamePrefix'), '_', mod(copyIndex(), parameters('parallelCount')), '_', div(copyIndex(), parameters('parallelCount')))]",
       "location": "[parameters('location')]",
+      "zones": "[if(empty(parameters('zone')), json('null'), array(parameters('zone')))]",
       "dependsOn": [
         "nicLoop"
       ],
