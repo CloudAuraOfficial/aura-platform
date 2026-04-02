@@ -1,0 +1,167 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "vmNamePrefix": { "type": "string", "defaultValue": "AuraVM" },
+    "parallelCount": { "type": "int", "defaultValue": 2, "metadata": { "description": "Number of parallel VM lanes" } },
+    "sequentialCount": { "type": "int", "defaultValue": 2, "metadata": { "description": "Number of sequential VMs per lane" } },
+    "location": { "type": "string", "defaultValue": "[resourceGroup().location]" },
+    "vmSize": { "type": "string", "defaultValue": "Standard_B1s" },
+    "adminUsername": { "type": "string", "defaultValue": "azureuser" },
+    "adminPassword": { "type": "securestring" },
+    "osDiskSizeGB": { "type": "int", "defaultValue": 30 }
+  },
+  "variables": {
+    "totalVMs": "[mul(parameters('parallelCount'), parameters('sequentialCount'))]",
+    "vnetName": "[concat(parameters('vmNamePrefix'), '-vnet')]",
+    "subnetName": "default",
+    "nsgName": "[concat(parameters('vmNamePrefix'), '-nsg')]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('vnetName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "addressSpace": { "addressPrefixes": [ "10.0.0.0/16" ] },
+        "subnets": [
+          {
+            "name": "[variables('subnetName')]",
+            "properties": { "addressPrefix": "10.0.0.0/24" }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('nsgName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "securityRules": [
+          {
+            "name": "Allow-SSH",
+            "properties": {
+              "priority": 100,
+              "direction": "Inbound",
+              "access": "Allow",
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "22"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "comments": "Public IPs for each VM — deployed in parallel",
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(parameters('vmNamePrefix'), '_', mod(copyIndex(), parameters('parallelCount')), '_', div(copyIndex(), parameters('parallelCount')), '-ip')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Standard" },
+      "properties": { "publicIPAllocationMethod": "Static" },
+      "copy": {
+        "name": "pipLoop",
+        "count": "[variables('totalVMs')]"
+      }
+    },
+    {
+      "comments": "NICs for each VM — deployed in parallel after VNet + NSG + PIPs",
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(parameters('vmNamePrefix'), '_', mod(copyIndex(), parameters('parallelCount')), '_', div(copyIndex(), parameters('parallelCount')), '-nic')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('vnetName'))]",
+        "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]",
+        "pipLoop"
+      ],
+      "properties": {
+        "networkSecurityGroup": {
+          "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgName'))]"
+        },
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Dynamic",
+              "subnet": {
+                "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('vnetName'), variables('subnetName'))]"
+              },
+              "publicIPAddress": {
+                "id": "[resourceId('Microsoft.Network/publicIPAddresses', concat(parameters('vmNamePrefix'), '_', mod(copyIndex(), parameters('parallelCount')), '_', div(copyIndex(), parameters('parallelCount')), '-ip'))]"
+              }
+            }
+          }
+        ]
+      },
+      "copy": {
+        "name": "nicLoop",
+        "count": "[variables('totalVMs')]"
+      }
+    },
+    {
+      "comments": "VMs: serial mode with batchSize=parallelCount. Batch 1: AuraVM_0_0 + AuraVM_1_0 (parallel). Batch 2: AuraVM_0_1 + AuraVM_1_1 (parallel, after batch 1).",
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(parameters('vmNamePrefix'), '_', mod(copyIndex(), parameters('parallelCount')), '_', div(copyIndex(), parameters('parallelCount')))]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "nicLoop"
+      ],
+      "properties": {
+        "hardwareProfile": { "vmSize": "[parameters('vmSize')]" },
+        "osProfile": {
+          "computerName": "[concat(parameters('vmNamePrefix'), mod(copyIndex(), parameters('parallelCount')), div(copyIndex(), parameters('parallelCount')))]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]"
+        },
+        "storageProfile": {
+          "imageReference": {
+            "publisher": "Canonical",
+            "offer": "ubuntu-24_04-lts",
+            "sku": "server",
+            "version": "latest"
+          },
+          "osDisk": {
+            "name": "[concat(parameters('vmNamePrefix'), '_', mod(copyIndex(), parameters('parallelCount')), '_', div(copyIndex(), parameters('parallelCount')), '-osdisk')]",
+            "createOption": "FromImage",
+            "diskSizeGB": "[parameters('osDiskSizeGB')]",
+            "managedDisk": { "storageAccountType": "Standard_LRS" }
+          }
+        },
+        "networkProfile": {
+          "networkInterfaces": [
+            {
+              "id": "[resourceId('Microsoft.Network/networkInterfaces', concat(parameters('vmNamePrefix'), '_', mod(copyIndex(), parameters('parallelCount')), '_', div(copyIndex(), parameters('parallelCount')), '-nic'))]",
+              "properties": { "primary": true }
+            }
+          ]
+        }
+      },
+      "copy": {
+        "name": "vmLoop",
+        "count": "[variables('totalVMs')]",
+        "mode": "serial",
+        "batchSize": "[parameters('parallelCount')]"
+      }
+    }
+  ],
+  "outputs": {
+    "vmNames": {
+      "type": "array",
+      "copy": {
+        "count": "[variables('totalVMs')]",
+        "input": "[concat(parameters('vmNamePrefix'), '_', mod(copyIndex(), parameters('parallelCount')), '_', div(copyIndex(), parameters('parallelCount')))]"
+      }
+    },
+    "totalVMsDeployed": {
+      "type": "int",
+      "value": "[variables('totalVMs')]"
+    }
+  }
+}
