@@ -11,10 +11,14 @@
     <div class="stat"><div class="stat-value" id="deploymentCount">-</div><div class="stat-label">Deployments</div></div>
     <div class="stat"><div class="stat-value" id="userCount">-</div><div class="stat-label">Users</div></div>
     <div class="stat"><div class="stat-value" id="accountCount">-</div><div class="stat-label">Cloud Accounts</div></div>
+    <div class="stat"><div class="stat-value" id="totalCost">-</div><div class="stat-label">Total Cost (est.)</div></div>
 </div>
 
 <h2>Recent Deployment Runs</h2>
 <div id="recentRuns"><div class="empty">Loading...</div></div>
+
+<h2>Recent Essences</h2>
+<div id="recentEssences"><div class="empty">Loading...</div></div>
 
 <script>
 const token = localStorage.getItem('aura_token');
@@ -31,39 +35,53 @@ function badge(status) {
     return `<span class="badge badge-${map[status] || 'muted'}">${status}</span>`;
 }
 
-(async () => {
-    const [essences, deployments, users, accounts] = await Promise.all([
-        api('/api/v1/essences?limit=1'), api('/api/v1/deployments?limit=1'),
-        api('/api/v1/users?limit=1'), api('/api/v1/cloud-accounts?limit=1')
-    ]);
-    if (essences) document.getElementById('essenceCount').textContent = essences.total;
-    if (deployments) document.getElementById('deploymentCount').textContent = deployments.total;
-    if (users) document.getElementById('userCount').textContent = users.total;
-    if (accounts) document.getElementById('accountCount').textContent = accounts.total;
+function formatCost(cost) {
+    if (cost == null) return '-';
+    return '$' + Number(cost).toFixed(4);
+}
 
-    // Fetch recent runs from all deployments
-    if (deployments && deployments.items?.length > 0) {
-        const allRuns = [];
-        for (const d of (await api('/api/v1/deployments?limit=100'))?.items || []) {
-            const runs = await api(`/api/v1/deployments/${d.id}/runs?limit=5`);
-            if (runs?.items) runs.items.forEach(r => allRuns.push({ ...r, deploymentName: d.name }));
-        }
-        allRuns.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-        const recent = allRuns.slice(0, 10);
-        if (recent.length === 0) {
-            document.getElementById('recentRuns').innerHTML = '<div class="empty">No runs yet</div>';
-        } else {
-            document.getElementById('recentRuns').innerHTML = `<table><thead><tr>
-                <th>Deployment</th><th>Status</th><th>Layers</th><th>Started</th><th>Duration</th>
-            </tr></thead><tbody>${recent.map(r => {
-                const started = r.startedAt ? new Date(r.startedAt).toLocaleString() : '-';
-                const dur = r.startedAt && r.completedAt ? Math.round((new Date(r.completedAt) - new Date(r.startedAt))/1000) + 's' : '-';
-                return `<tr><td>${r.deploymentName || '-'}</td><td>${badge(r.status)}</td>
-                    <td>${r.layers?.length || 0}</td><td>${started}</td><td>${dur}</td></tr>`;
-            }).join('')}</tbody></table>`;
-        }
-    } else {
-        document.getElementById('recentRuns').innerHTML = '<div class="empty">No deployments yet</div>';
+async function loadDashboard() {
+    // Single consolidated stats call (replaces 4 separate limit=1 calls)
+    const stats = await api('/api/v1/dashboard/stats');
+    if (stats) {
+        document.getElementById('essenceCount').textContent = stats.essenceCount;
+        document.getElementById('deploymentCount').textContent = stats.deploymentCount;
+        document.getElementById('userCount').textContent = stats.userCount;
+        document.getElementById('accountCount').textContent = stats.cloudAccountCount;
+        document.getElementById('totalCost').textContent = '$' + Number(stats.totalCostUsd).toFixed(2);
     }
-})();
+
+    // Recent runs — single query replaces the N+1 loop
+    const runs = await api('/api/v1/dashboard/recent-runs?limit=10');
+    if (runs && runs.length > 0) {
+        document.getElementById('recentRuns').innerHTML = `<table><thead><tr>
+            <th>Deployment</th><th>Status</th><th>Layers</th><th>Started</th><th>Duration</th><th>Est. Cost</th>
+        </tr></thead><tbody>${runs.map(r => {
+            const started = r.startedAt ? new Date(r.startedAt).toLocaleString() : '-';
+            const dur = r.startedAt && r.completedAt ? Math.round((new Date(r.completedAt) - new Date(r.startedAt))/1000) + 's' : '-';
+            return `<tr><td>${esc(r.deploymentName)}</td><td>${badge(r.status)}</td>
+                <td>${r.layerCount}</td><td>${started}</td><td>${dur}</td><td>${formatCost(r.estimatedCostUsd)}</td></tr>`;
+        }).join('')}</tbody></table>`;
+    } else if (runs) {
+        document.getElementById('recentRuns').innerHTML = '<div class="empty">No runs yet</div>';
+    }
+
+    // Recent essences
+    const essences = await api('/api/v1/dashboard/recent-essences?limit=5');
+    if (essences && essences.length > 0) {
+        document.getElementById('recentEssences').innerHTML = `<table><thead><tr>
+            <th>Name</th><th>Provider</th><th>Layers</th><th>Version</th><th>Last Updated</th>
+        </tr></thead><tbody>${essences.map(e => {
+            return `<tr><td><strong>${esc(e.name)}</strong></td>
+                <td><span class="badge badge-info">${esc(e.provider)}</span></td>
+                <td>${e.layerCount} layer${e.layerCount !== 1 ? 's' : ''}</td>
+                <td>v${e.currentVersion}</td>
+                <td>${new Date(e.updatedAt).toLocaleString()}</td></tr>`;
+        }).join('')}</tbody></table>`;
+    } else if (essences) {
+        document.getElementById('recentEssences').innerHTML = '<div class="empty">No essences yet</div>';
+    }
+}
+loadDashboard();
+setInterval(loadDashboard, 10000);
 </script>

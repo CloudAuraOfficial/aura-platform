@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aura.Api.Middleware;
+using Aura.Api.Services;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
 using Aura.Core.Interfaces;
@@ -18,12 +19,15 @@ public class EssencesController : ControllerBase
     private readonly AuraDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly IAuditService _audit;
+    private readonly AiEssenceBuilderService _aiBuilder;
 
-    public EssencesController(AuraDbContext db, ITenantContext tenant, IAuditService audit)
+    public EssencesController(AuraDbContext db, ITenantContext tenant, IAuditService audit,
+        AiEssenceBuilderService aiBuilder)
     {
         _db = db;
         _tenant = tenant;
         _audit = audit;
+        _aiBuilder = aiBuilder;
     }
 
     [HttpGet]
@@ -283,6 +287,30 @@ public class EssencesController : ControllerBase
             $"from={id}");
 
         return CreatedAtAction(nameof(Get), new { id = clone.Id }, ToDto(clone));
+    }
+
+    [HttpPost("generate")]
+    [Authorize(Roles = "Admin,Member")]
+    public async Task<IActionResult> Generate([FromBody] GenerateEssenceRequest request)
+    {
+        var accountExists = await _db.CloudAccounts.AnyAsync(c => c.Id == request.CloudAccountId);
+        if (!accountExists)
+            return BadRequest(new ErrorResponse("bad_request", "Cloud account not found.", 400));
+
+        try
+        {
+            var result = await _aiBuilder.GenerateAsync(
+                GetCurrentUserId(), request, _tenant.TenantId, HttpContext.RequestAborted);
+            return Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new ErrorResponse("bad_request", ex.Message, 400));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new ErrorResponse("generation_failed", ex.Message, 422));
+        }
     }
 
     [HttpDelete("{id:guid}")]

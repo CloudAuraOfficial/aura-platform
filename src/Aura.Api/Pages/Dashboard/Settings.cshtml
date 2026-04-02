@@ -1,0 +1,191 @@
+@page "/dashboard/settings"
+@{
+    ViewData["Title"] = "Account Settings";
+    Layout = "/Pages/Shared/_Layout.cshtml";
+}
+
+<style>
+    .settings-section { margin-bottom: 2rem; }
+    .settings-section h2 { font-size: 1.1rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }
+    .provider-row { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1rem; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.5rem; }
+    .provider-info { display: flex; align-items: center; gap: 1rem; }
+    .provider-name { font-weight: 600; text-transform: capitalize; }
+    .provider-label { color: var(--muted); font-size: 0.85rem; }
+    .provider-key { font-family: monospace; color: var(--muted); font-size: 0.8rem; }
+    .provider-actions { display: flex; gap: 0.5rem; }
+</style>
+
+<div class="toolbar">
+    <h1>Account Settings</h1>
+</div>
+
+<div class="settings-section">
+    <h2>AI Model API Keys</h2>
+    <p style="color:var(--muted);font-size:0.85rem;margin-bottom:1rem">
+        Configure API keys for AI-powered essence generation. Keys are encrypted at rest.
+    </p>
+    <div id="providerList"><div class="empty">Loading...</div></div>
+    <button class="btn btn-primary" id="btnAddProvider" style="margin-top:0.75rem">+ Add Provider</button>
+</div>
+
+<!-- Add / Edit Modal -->
+<div class="modal-overlay" id="modal">
+    <div class="modal">
+        <h2 id="modalTitle">Add AI Provider</h2>
+        <div id="modalError" class="alert alert-error" style="display:none"></div>
+        <form id="providerForm">
+            <input type="hidden" id="editProvider" />
+            <div class="form-group" id="providerSelectGroup">
+                <label>Provider</label>
+                <select id="fProvider" required></select>
+            </div>
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="password" id="fApiKey" required placeholder="sk-..." autocomplete="off" />
+            </div>
+            <div class="form-group">
+                <label>Label (optional)</label>
+                <input type="text" id="fLabel" maxlength="200" placeholder="e.g. My OpenAI key" />
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="btnCancel">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="saveBtn">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+const token = localStorage.getItem('aura_token');
+if (!token) window.location.href = '/dashboard/login';
+
+let supportedProviders = [];
+
+async function api(path, opts = {}) {
+    const res = await fetch(path, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        ...opts
+    });
+    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    if (res.status === 204) return {};
+    return await res.json();
+}
+
+function toast(msg, type = 'success') {
+    var el = document.createElement('div');
+    el.className = 'toast toast-' + type;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(function() { el.remove(); }, 3000);
+}
+
+async function loadSupportedProviders() {
+    supportedProviders = await api('/api/v1/account/supported-providers') || [];
+}
+
+async function loadProviders() {
+    var data = await api('/api/v1/account/ai-providers');
+    if (!data || data.length === 0) {
+        document.getElementById('providerList').innerHTML = '<div class="empty">No AI providers configured yet.</div>';
+        return;
+    }
+
+    var html = data.map(function(p) {
+        return '<div class="provider-row">' +
+            '<div class="provider-info">' +
+                '<span class="provider-name">' + esc(p.providerName) + '</span>' +
+                (p.displayLabel ? '<span class="provider-label">' + esc(p.displayLabel) + '</span>' : '') +
+                '<span class="provider-key">' + (p.hasKey ? 'Key configured' : 'No key') + '</span>' +
+            '</div>' +
+            '<div class="provider-actions">' +
+                '<button class="btn btn-primary btn-sm" data-action="edit" data-provider="' + esc(p.providerName) + '" data-label="' + esc(p.displayLabel || '') + '">Edit</button> ' +
+                '<button class="btn btn-danger btn-sm" data-action="delete" data-provider="' + esc(p.providerName) + '">Delete</button>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+
+    document.getElementById('providerList').innerHTML = html;
+}
+
+function openModal(editProviderName) {
+    var isEdit = !!editProviderName;
+    document.getElementById('modalTitle').textContent = isEdit ? 'Update API Key' : 'Add AI Provider';
+    document.getElementById('saveBtn').textContent = isEdit ? 'Update' : 'Save';
+    document.getElementById('editProvider').value = editProviderName || '';
+    document.getElementById('fApiKey').value = '';
+    document.getElementById('fLabel').value = '';
+    document.getElementById('modalError').style.display = 'none';
+
+    // Build provider dropdown
+    var sel = document.getElementById('fProvider');
+    if (isEdit) {
+        sel.innerHTML = '<option value="' + esc(editProviderName) + '">' + esc(editProviderName) + '</option>';
+        sel.disabled = true;
+    } else {
+        sel.innerHTML = supportedProviders.map(function(p) {
+            return '<option value="' + esc(p.name) + '">' + esc(p.label) + '</option>';
+        }).join('');
+        sel.disabled = false;
+    }
+
+    document.getElementById('providerSelectGroup').style.display = isEdit ? 'none' : '';
+    document.getElementById('modal').classList.add('open');
+}
+
+document.getElementById('btnAddProvider').addEventListener('click', function() { openModal(null); });
+document.getElementById('btnCancel').addEventListener('click', function() { document.getElementById('modal').classList.remove('open'); });
+
+document.getElementById('providerForm').addEventListener('submit', function(ev) {
+    ev.preventDefault();
+    var editProvider = document.getElementById('editProvider').value;
+    var providerName = editProvider || document.getElementById('fProvider').value;
+    var apiKey = document.getElementById('fApiKey').value;
+    var label = document.getElementById('fLabel').value || null;
+    var errEl = document.getElementById('modalError');
+
+    (async function() {
+        var res;
+        if (editProvider) {
+            res = await api('/api/v1/account/ai-providers/' + encodeURIComponent(providerName), {
+                method: 'PUT', body: JSON.stringify({ apiKey: apiKey, displayLabel: label })
+            });
+        } else {
+            res = await api('/api/v1/account/ai-providers', {
+                method: 'POST', body: JSON.stringify({ providerName: providerName, apiKey: apiKey, displayLabel: label })
+            });
+        }
+        if (res && res.error) {
+            errEl.textContent = res.message;
+            errEl.style.display = 'block';
+            return;
+        }
+        document.getElementById('modal').classList.remove('open');
+        toast(editProvider ? 'API key updated' : 'Provider added');
+        loadProviders();
+    })();
+});
+
+document.getElementById('providerList').addEventListener('click', function(ev) {
+    var el = ev.target.closest('[data-action]');
+    if (!el) return;
+    var action = el.dataset.action;
+    var provider = el.dataset.provider;
+
+    if (action === 'edit') {
+        document.getElementById('fLabel').value = el.dataset.label || '';
+        openModal(provider);
+    } else if (action === 'delete') {
+        if (!confirm('Remove ' + provider + ' API key?')) return;
+        (async function() {
+            await api('/api/v1/account/ai-providers/' + encodeURIComponent(provider), { method: 'DELETE' });
+            toast('Provider removed');
+            loadProviders();
+        })();
+    }
+});
+
+(async function() {
+    await loadSupportedProviders();
+    await loadProviders();
+})();
+</script>

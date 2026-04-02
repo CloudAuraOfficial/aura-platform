@@ -4,20 +4,26 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>@ViewData["Title"] - Aura Platform</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/css/site.css" />
 </head>
 <body>
     <nav class="nav">
-        <div class="nav-brand">Aura Platform</div>
+        <div class="nav-brand">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="24" height="24" style="vertical-align:middle;margin-right:6px">
+                <path d="M16 4L4 28h6l2-4.5h8L22 28h6L16 4zm0 10l3 6.5h-6L16 14z" fill="#6366f1"/>
+            </svg>Aura Platform
+        </div>
         <div class="nav-links">
-            <a href="/dashboard">Dashboard</a>
-            <a href="/dashboard/essences">Essences</a>
-            <a href="/dashboard/deployments">Deployments</a>
-            <a href="/dashboard/cloud-accounts">Accounts</a>
-            <a href="/dashboard/users">Users</a>
-            <a href="/dashboard/experiments">Experiments</a>
-            <a href="/dashboard/audit">Audit Log</a>
-            <a href="/dashboard/login" class="nav-logout">Login</a>
+            <a href="/dashboard" class="auth-only" style="display:none">Dashboard</a>
+            <a href="/dashboard/essences" class="auth-only" style="display:none">Essences</a>
+            <a href="/dashboard/deployments" class="auth-only" style="display:none">Deployments</a>
+            <a href="/dashboard/cloud-accounts" class="auth-only" style="display:none">Accounts</a>
+            <a href="/dashboard/users" class="auth-only" style="display:none">Users</a>
+            <a href="/dashboard/experiments" class="auth-only" style="display:none">Experiments</a>
+            <a href="/dashboard/audit" class="auth-only" style="display:none">Audit Log</a>
+            <a href="/dashboard/settings" class="auth-only" style="display:none">Settings</a>
+            <a href="/dashboard/login" id="authLink" class="nav-logout">Login</a>
         </div>
     </nav>
     <main class="content">
@@ -26,5 +32,64 @@
     <footer class="footer">
         <small>Aura Platform &copy; @DateTime.UtcNow.Year</small>
     </footer>
+    <script>
+    // Global HTML escape function to prevent XSS (C6)
+    function esc(s) {
+        if (s == null) return '';
+        var d = document.createElement('div');
+        d.appendChild(document.createTextNode(String(s)));
+        return d.innerHTML;
+    }
+    (function() {
+        var link = document.getElementById('authLink');
+        var token = localStorage.getItem('aura_token');
+        if (token) {
+            link.textContent = 'Logout';
+            link.href = '#';
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                localStorage.removeItem('aura_token');
+                localStorage.removeItem('aura_refresh');
+                window.location.href = '/dashboard/login';
+            });
+            // Show authenticated nav links
+            document.querySelectorAll('.auth-only').forEach(function(el) { el.style.display = ''; });
+        }
+
+        // Auto-refresh token before expiry
+        function parseJwt(t) {
+            try { return JSON.parse(atob(t.split('.')[1])); } catch { return null; }
+        }
+        function scheduleRefresh() {
+            var t = localStorage.getItem('aura_token');
+            if (!t) return;
+            var payload = parseJwt(t);
+            if (!payload || !payload.exp) return;
+            var msUntilExpiry = payload.exp * 1000 - Date.now();
+            // Refresh 60s before expiry, but not if already expired
+            var delay = msUntilExpiry - 60000;
+            if (delay < 0) delay = 0;
+            if (msUntilExpiry < 0) return; // already expired
+            setTimeout(async function() {
+                var refresh = localStorage.getItem('aura_refresh');
+                if (!refresh) return;
+                try {
+                    var res = await fetch('/api/v1/auth/refresh', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token: localStorage.getItem('aura_token'), refreshToken: refresh })
+                    });
+                    if (res.ok) {
+                        var data = await res.json();
+                        localStorage.setItem('aura_token', data.token);
+                        localStorage.setItem('aura_refresh', data.refreshToken);
+                        scheduleRefresh();
+                    }
+                } catch {}
+            }, delay);
+        }
+        scheduleRefresh();
+    })();
+    </script>
 </body>
 </html>

@@ -8,7 +8,8 @@ public sealed record DeploymentRunResponse(
     IReadOnlyList<DeploymentLayerResponse> Layers,
     DateTime? StartedAt,
     DateTime? CompletedAt,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    decimal? EstimatedCostUsd = null
 );
 
 public sealed record DeploymentLayerResponse(

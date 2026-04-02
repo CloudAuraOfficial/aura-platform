@@ -8,6 +8,7 @@ using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+// PreflightValidationService registered in DI below
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -57,15 +58,16 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 builder.Services.AddAuthorization();
 
-// CORS
+// H6: CORS — require explicit origins, no AllowAnyOrigin fallback
+if (allowedOrigins.Length == 0)
+    Console.WriteLine("WARNING: CORS_ORIGINS not set — CORS will reject all cross-origin requests.");
+
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
         if (allowedOrigins.Length > 0)
             policy.WithOrigins(allowedOrigins);
-        else
-            policy.AllowAnyOrigin();
 
         policy.AllowAnyHeader().AllowAnyMethod();
     });
@@ -99,6 +101,16 @@ builder.Services.AddRateLimiter(options =>
                 PermitLimit = 10,
                 Window = TimeSpan.FromMinutes(1)
             }));
+
+    // M2: Strict rate limit for deploy webhook
+    options.AddPolicy("deploy", context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromHours(1)
+            }));
 });
 
 // DI
@@ -110,13 +122,33 @@ var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
     ?? throw new InvalidOperationException("ENCRYPTION_KEY is required");
 builder.Services.AddSingleton<ICryptoService>(new AesCryptoService(encryptionKey));
 builder.Services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
+builder.Services.AddScoped<Aura.Api.Services.PreflightValidationService>();
 builder.Services.AddScoped<IExperimentService, ExperimentService>();
+builder.Services.AddScoped<UserAiKeyService>();
 
-// Redis
+// LLM providers for AI essence generation
+builder.Services.AddHttpClient("llm");
+builder.Services.AddSingleton<ILlmProviderFactory>(sp =>
+{
+    var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
+    var providers = new ILlmProvider[]
+    {
+        new OpenAiLlmProvider(httpFactory.CreateClient("llm")),
+        new AnthropicLlmProvider(httpFactory.CreateClient("llm"))
+    };
+    return new LlmProviderFactory(providers);
+});
+builder.Services.AddScoped<AiEssenceBuilderService>();
+
+// H5: Redis with optional authentication
 var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "localhost";
 var redisPort = Environment.GetEnvironmentVariable("REDIS_PORT") ?? "6379";
+var redisPassword = Environment.GetEnvironmentVariable("REDIS_PASSWORD") ?? "";
+var redisConnStr = string.IsNullOrEmpty(redisPassword)
+    ? $"{redisHost}:{redisPort},abortConnect=false"
+    : $"{redisHost}:{redisPort},password={redisPassword},abortConnect=false";
 builder.Services.AddSingleton<IConnectionMultiplexer>(
-    ConnectionMultiplexer.Connect($"{redisHost}:{redisPort},abortConnect=false"));
+    ConnectionMultiplexer.Connect(redisConnStr));
 builder.Services.AddSingleton<ILogStreamService, RedisLogStreamService>();
 
 // OpenTelemetry tracing
@@ -153,6 +185,20 @@ app.UseMiddleware<ExceptionHandlerMiddleware>();
 app.UseMiddleware<RequestLoggingMiddleware>();
 app.UseRateLimiter();
 app.UseCors();
+
+// H7: Security headers
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    context.Response.Headers["Content-Security-Policy"] =
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none';";
+    await next();
+});
+
+app.UseStatusCodePagesWithReExecute("/error/{0}");
 
 // Health endpoint
 app.MapGet("/health", () => Results.Ok(new { Status = "healthy", Timestamp = DateTime.UtcNow }));
@@ -195,7 +241,7 @@ app.MapPost("/api/internal/deploy", (HttpContext ctx) =>
     });
 
     return Results.Ok(new { Status = "deploy_triggered", Timestamp = DateTime.UtcNow });
-});
+}).RequireRateLimiting("deploy");
 
 // Prometheus metrics endpoint
 app.UseHttpMetrics();
@@ -205,7 +251,7 @@ app.UseStaticFiles();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers().RequireRateLimiting("global");
-app.MapRazorPages();
+app.MapRazorPages().RequireRateLimiting("global");
 app.MapGet("/", () => Results.Redirect("/dashboard"));
 
 // Auto-migrate database on startup (safe for single-instance deployments)

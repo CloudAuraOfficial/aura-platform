@@ -4,33 +4,132 @@
     Layout = "/Pages/Shared/_Layout.cshtml";
 }
 
+<style>
+    .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 1rem; }
+    .tab { padding: 0.5rem 1rem; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; font-size: 0.875rem; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .layer-card { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; margin-bottom: 0.75rem; position: relative; }
+    .layer-card .layer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    .layer-card .layer-header h3 { font-size: 0.9rem; color: var(--accent); margin: 0; display: flex; align-items: center; gap: 0.5rem; }
+    .layer-card .layer-header .layer-actions { display: flex; gap: 0.25rem; align-items: center; }
+    .layer-num { background: var(--accent); color: #fff; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; }
+    .layer-card .form-row { grid-template-columns: 1fr 1fr 1fr; }
+    .dep-tags { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 0.25rem; }
+    .dep-tag { background: rgba(99,102,241,0.15); color: var(--accent); padding: 0.1rem 0.5rem; border-radius: 3px; font-size: 0.7rem; display: inline-flex; align-items: center; gap: 0.25rem; }
+    .dep-tag .remove-dep { cursor: pointer; opacity: 0.6; }
+    .dep-tag .remove-dep:hover { opacity: 1; }
+    .toggle-label { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--muted); cursor: pointer; }
+    .toggle-label input { width: auto; }
+    .params-editor { margin-top: 0.5rem; }
+    .params-editor textarea { min-height: 80px; font-size: 0.75rem; }
+    .add-layer-btn { width: 100%; padding: 0.6rem; border: 2px dashed var(--border); background: transparent; color: var(--muted); border-radius: 8px; cursor: pointer; font-size: 0.875rem; transition: all 0.2s; }
+    .add-layer-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .section-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-bottom: 0.5rem; font-weight: 600; }
+    .modal-wide { max-width: 720px; }
+    .drag-handle { cursor: grab; color: var(--muted); font-size: 1rem; user-select: none; }
+    .drag-handle:active { cursor: grabbing; }
+    .field-hint { font-size: 0.7rem; color: var(--muted); margin-top: 0.15rem; }
+</style>
+
 <div class="toolbar">
     <h1>Essences</h1>
-    <button class="btn btn-primary" onclick="openCreate()">+ New Essence</button>
+    <div style="display:flex;gap:0.5rem">
+        <button class="btn btn-secondary" id="btnAiGenerate">AI Generate</button>
+        <button class="btn btn-primary" id="btnNewEssence">+ New Essence</button>
+    </div>
 </div>
 <div id="content"><div class="empty">Loading...</div></div>
 
 <!-- Create / Edit Modal -->
 <div class="modal-overlay" id="modal">
-    <div class="modal">
+    <div class="modal modal-wide">
         <h2 id="modalTitle">New Essence</h2>
         <div id="modalError" class="alert alert-error" style="display:none"></div>
-        <form id="essenceForm" onsubmit="return saveEssence(event)">
+        <form id="essenceForm">
             <input type="hidden" id="editId" />
-            <div class="form-group">
-                <label>Name</label>
-                <input type="text" id="fName" required maxlength="200" />
+
+            <!-- Name + Account (always visible) -->
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Essence Name</label>
+                    <input type="text" id="fName" required maxlength="200" placeholder="e.g. Deploy Production VM" />
+                </div>
+                <div class="form-group">
+                    <label>Cloud Account</label>
+                    <select id="fAccount" required></select>
+                </div>
             </div>
-            <div class="form-group">
-                <label>Cloud Account</label>
-                <select id="fAccount" required></select>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <div class="tab active" data-tab="base">Base Essence</div>
+                <div class="tab" data-tab="layers">Layers</div>
+                <div class="tab" data-tab="json">Raw JSON</div>
             </div>
-            <div class="form-group">
-                <label>Essence JSON</label>
-                <textarea id="fJson" required></textarea>
+
+            <!-- Tab: Base Essence -->
+            <div class="tab-panel active" id="panel-base">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Cloud Provider</label>
+                        <select id="fProvider">
+                            <option value="Azure">Azure</option>
+                            <option value="Aws">AWS</option>
+                            <option value="Gcp">GCP</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Default Region</label>
+                        <input type="text" id="fRegion" placeholder="e.g. eastus, us-east-1" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Base Load</label>
+                        <input type="text" id="fBaseLoad" placeholder="e.g. EmissionLoadVM, EmissionLoadACI" />
+                        <div class="field-hint">Execution strategy for this essence</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Unique ID</label>
+                        <input type="text" id="fUniqueId" placeholder="e.g. cloudaura-prod" />
+                        <div class="field-hint">Unique identifier for this deployment target</div>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Schedule (Cron)</label>
+                        <input type="text" id="fSchedule" placeholder="e.g. 0 2 * * * (optional)" />
+                        <div class="field-hint">Leave empty for manual-only deployments</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Subscription / Account ID</label>
+                        <input type="text" id="fSubscription" placeholder="Auto-filled from cloud account" />
+                    </div>
+                </div>
             </div>
+
+            <!-- Tab: Layers -->
+            <div class="tab-panel" id="panel-layers">
+                <div class="section-label">Deployment Layers (executed in order, respecting dependencies)</div>
+                <div id="layerList"></div>
+                <button type="button" class="add-layer-btn" id="btnAddLayer">+ Add Layer</button>
+            </div>
+
+            <!-- Tab: Raw JSON -->
+            <div class="tab-panel" id="panel-json">
+                <div class="section-label">Full Essence JSON (advanced)</div>
+                <div class="form-group">
+                    <textarea id="fJson" style="min-height:300px"></textarea>
+                </div>
+                <div class="field-hint">Editing raw JSON will override the form fields above. Switch tabs to sync.</div>
+            </div>
+
             <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="button" class="btn btn-secondary" id="btnCancel">Cancel</button>
                 <button type="submit" class="btn btn-primary" id="saveBtn">Create</button>
             </div>
         </form>
@@ -42,17 +141,51 @@
     <div class="modal">
         <h2>Clone Essence</h2>
         <div id="cloneError" class="alert alert-error" style="display:none"></div>
-        <form onsubmit="return doClone(event)">
+        <form id="cloneForm">
             <input type="hidden" id="cloneId" />
             <div class="form-group">
                 <label>New Name</label>
                 <input type="text" id="cloneName" required maxlength="200" />
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn btn-secondary" onclick="document.getElementById('cloneModal').classList.remove('open')">Cancel</button>
+                <button type="button" class="btn btn-secondary" id="btnCloneCancel">Cancel</button>
                 <button type="submit" class="btn btn-primary">Clone</button>
             </div>
         </form>
+    </div>
+</div>
+
+<!-- AI Generate Modal -->
+<div class="modal-overlay" id="aiModal">
+    <div class="modal modal-wide">
+        <h2>AI Essence Generator</h2>
+        <div id="aiError" class="alert alert-error" style="display:none"></div>
+        <div id="aiSuccess" class="alert" style="display:none;background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.2);padding:0.75rem;border-radius:6px;margin-bottom:1rem"></div>
+        <form id="aiForm">
+            <div class="form-group">
+                <label>Describe what you want to deploy</label>
+                <textarea id="aiPrompt" required maxlength="2000" rows="4"
+                    placeholder="e.g. Deploy an Ubuntu VM with 2 vCPUs in East US with a public IP, then run a health check on port 80"></textarea>
+                <div class="field-hint">Max 2000 characters. Be specific about cloud provider, region, and resource types.</div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Cloud Account</label>
+                    <select id="aiAccount" required></select>
+                </div>
+                <div class="form-group">
+                    <label>AI Provider</label>
+                    <select id="aiProvider" required></select>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="btnAiCancel">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="aiSubmitBtn">Generate Essence</button>
+            </div>
+        </form>
+        <div id="aiStats" style="display:none;margin-top:1rem;font-size:0.8rem;color:var(--muted)">
+            <span id="aiStatsText"></span>
+        </div>
     </div>
 </div>
 
@@ -61,6 +194,7 @@ const token = localStorage.getItem('aura_token');
 if (!token) window.location.href = '/dashboard/login';
 
 let accounts = [];
+let layerCounter = 0;
 
 async function api(path, opts = {}) {
     const res = await fetch(path, {
@@ -73,77 +207,339 @@ async function api(path, opts = {}) {
 }
 
 function toast(msg, type = 'success') {
-    const el = document.createElement('div');
-    el.className = `toast toast-${type}`;
+    var el = document.createElement('div');
+    el.className = 'toast toast-' + type;
     el.textContent = msg;
     document.body.appendChild(el);
-    setTimeout(() => el.remove(), 3000);
+    setTimeout(function() { el.remove(); }, 3000);
 }
 
+// === Tab switching ===
+document.querySelector('.tabs').addEventListener('click', function(ev) {
+    var tab = ev.target.closest('.tab');
+    if (!tab) return;
+    var target = tab.dataset.tab;
+
+    // Sync data when switching tabs
+    if (target === 'json') formToJson();
+    if (target === 'base' || target === 'layers') {
+        var raw = document.getElementById('fJson').value.trim();
+        if (raw) { try { jsonToForm(JSON.parse(raw)); } catch(e) {} }
+    }
+
+    document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+    tab.classList.add('active');
+    document.getElementById('panel-' + target).classList.add('active');
+});
+
+// === Base Essence: Form <-> JSON ===
+function formToJson() {
+    var base = {};
+    var v;
+    v = document.getElementById('fProvider').value; if (v) base.cloudProvider = v;
+    v = document.getElementById('fRegion').value.trim(); if (v) base.defaultRegion = v;
+    v = document.getElementById('fBaseLoad').value.trim(); if (v) base.baseLoad = v;
+    v = document.getElementById('fUniqueId').value.trim(); if (v) base.uniqueId = v;
+    v = document.getElementById('fSchedule').value.trim(); if (v) base.Schedule = v;
+    v = document.getElementById('fSubscription').value.trim(); if (v) base.subscriptionId = v;
+
+    var layers = {};
+    document.querySelectorAll('.layer-card').forEach(function(card) {
+        var name = card.querySelector('.layer-name-input').value.trim();
+        if (!name) return;
+        var layer = {};
+        var opType = card.querySelector('.layer-optype').value.trim();
+        var execType = card.querySelector('.layer-exectype').value;
+        var script = card.querySelector('.layer-script').value.trim();
+        var approach = card.querySelector('.layer-approach').value.trim();
+        var enabled = card.querySelector('.layer-enabled').checked;
+
+        if (approach) layer._approach = approach;
+        var deps = [];
+        card.querySelectorAll('.dep-tag').forEach(function(tag) { deps.push(tag.dataset.dep); });
+        if (deps.length > 0) layer.dependsOn = deps;
+        layer.isEnabled = enabled;
+
+        var paramsStr = card.querySelector('.layer-params').value.trim();
+        try { layer.parameters = paramsStr ? JSON.parse(paramsStr) : {}; } catch(e) { layer.parameters = {}; }
+
+        if (script) layer.scriptPath = script;
+        if (execType && execType !== 'operation') layer.executorType = execType;
+        if (opType) layer.operationType = opType;
+
+        layers[name] = layer;
+    });
+
+    var obj = {};
+    if (Object.keys(layers).length > 0) obj.layers = layers;
+    if (Object.keys(base).length > 0) obj.baseEssence = base;
+
+    document.getElementById('fJson').value = JSON.stringify(obj, null, 2);
+}
+
+function jsonToForm(obj) {
+    var b = obj.baseEssence || {};
+    document.getElementById('fProvider').value = b.cloudProvider || 'Azure';
+    document.getElementById('fRegion').value = b.defaultRegion || '';
+    document.getElementById('fBaseLoad').value = b.baseLoad || '';
+    document.getElementById('fUniqueId').value = b.uniqueId || '';
+    document.getElementById('fSchedule').value = b.Schedule || '';
+    document.getElementById('fSubscription').value = b.subscriptionId || '';
+
+    // Rebuild layers
+    document.getElementById('layerList').innerHTML = '';
+    layerCounter = 0;
+    var layers = obj.layers || {};
+    var names = Object.keys(layers);
+    for (var i = 0; i < names.length; i++) {
+        addLayerCard(names[i], layers[names[i]], names);
+    }
+}
+
+// === Layer Builder ===
+function addLayerCard(name, data, allLayerNames) {
+    layerCounter++;
+    var card = document.createElement('div');
+    card.className = 'layer-card';
+    var d = data || {};
+    var deps = d.dependsOn || [];
+    var params = d.parameters || {};
+    var execType = d.executorType || (d.operationType ? 'operation' : 'operation');
+    var paramsPretty = Object.keys(params).length > 0 ? JSON.stringify(params, null, 2) : '';
+
+    card.innerHTML =
+        '<div class="layer-header">' +
+            '<h3><span class="layer-num">' + layerCounter + '</span> ' +
+                '<input type="text" class="layer-name-input" value="' + esc(name || '') + '" placeholder="Layer name" style="background:transparent;border:none;color:var(--text);font-size:0.9rem;font-weight:600;width:200px;" />' +
+            '</h3>' +
+            '<div class="layer-actions">' +
+                '<label class="toggle-label"><input type="checkbox" class="layer-enabled" ' + (d.isEnabled !== false ? 'checked' : '') + ' /> Enabled</label>' +
+                '<button type="button" class="btn btn-danger btn-sm remove-layer-btn" style="margin-left:0.5rem">Remove</button>' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-row">' +
+            '<div class="form-group">' +
+                '<label>Executor</label>' +
+                '<select class="layer-exectype">' +
+                    '<option value="operation"' + (execType === 'operation' || execType === 'Operation' ? ' selected' : '') + '>Azure SDK (Operation)</option>' +
+                    '<option value="emissionload"' + (execType === 'emissionload' || execType === 'EmissionLoad' ? ' selected' : '') + '>EmissionLoad (Container)</option>' +
+                    '<option value="powershell"' + (execType === 'powershell' || execType === 'PowerShell' ? ' selected' : '') + '>PowerShell</option>' +
+                    '<option value="python"' + (execType === 'python' || execType === 'Python' ? ' selected' : '') + '>Python</option>' +
+                    '<option value="csharp"' + (execType === 'csharp' || execType === 'CSharp' ? ' selected' : '') + '>C# SDK</option>' +
+                '</select>' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Operation Type</label>' +
+                '<input type="text" class="layer-optype" value="' + esc(d.operationType || '') + '" placeholder="e.g. CreateResourceGroup" />' +
+            '</div>' +
+            '<div class="form-group">' +
+                '<label>Script Path</label>' +
+                '<input type="text" class="layer-script" value="' + esc(d.scriptPath || '') + '" placeholder="/app/scripts/..." />' +
+            '</div>' +
+        '</div>' +
+        '<div class="form-group">' +
+            '<label>Approach / Description</label>' +
+            '<input type="text" class="layer-approach" value="' + esc(d._approach || '') + '" placeholder="e.g. Azure CLI via EmissionLoad container" />' +
+        '</div>' +
+        '<div class="form-group">' +
+            '<label>Depends On</label>' +
+            '<div class="dep-tags" id="deps-' + layerCounter + '">' +
+                deps.map(function(dep) {
+                    return '<span class="dep-tag" data-dep="' + esc(dep) + '">' + esc(dep) + ' <span class="remove-dep">&times;</span></span>';
+                }).join('') +
+            '</div>' +
+            '<select class="add-dep-select" style="margin-top:0.25rem;width:auto;padding:0.2rem 0.5rem;font-size:0.75rem;">' +
+                '<option value="">+ Add dependency...</option>' +
+            '</select>' +
+        '</div>' +
+        '<div class="params-editor">' +
+            '<label style="font-size:0.8rem;color:var(--muted);display:block;margin-bottom:0.25rem">Parameters (JSON)</label>' +
+            '<textarea class="layer-params" placeholder=\'{"resourceGroup": "my-rg", "location": "eastus"}\'>' + esc(paramsPretty) + '</textarea>' +
+        '</div>';
+
+    document.getElementById('layerList').appendChild(card);
+    refreshDependencyOptions();
+}
+
+function refreshDependencyOptions() {
+    var names = [];
+    document.querySelectorAll('.layer-name-input').forEach(function(inp) {
+        var n = inp.value.trim();
+        if (n) names.push(n);
+    });
+    document.querySelectorAll('.add-dep-select').forEach(function(sel) {
+        var card = sel.closest('.layer-card');
+        var thisName = card.querySelector('.layer-name-input').value.trim();
+        var existingDeps = [];
+        card.querySelectorAll('.dep-tag').forEach(function(t) { existingDeps.push(t.dataset.dep); });
+        var html = '<option value="">+ Add dependency...</option>';
+        for (var i = 0; i < names.length; i++) {
+            if (names[i] !== thisName && existingDeps.indexOf(names[i]) === -1) {
+                html += '<option value="' + esc(names[i]) + '">' + esc(names[i]) + '</option>';
+            }
+        }
+        sel.innerHTML = html;
+    });
+}
+
+// === Event Delegation for layer interactions ===
+document.getElementById('layerList').addEventListener('click', function(ev) {
+    if (ev.target.classList.contains('remove-layer-btn')) {
+        ev.target.closest('.layer-card').remove();
+        renumberLayers();
+        refreshDependencyOptions();
+    }
+    if (ev.target.classList.contains('remove-dep')) {
+        ev.target.closest('.dep-tag').remove();
+        refreshDependencyOptions();
+    }
+});
+
+document.getElementById('layerList').addEventListener('change', function(ev) {
+    if (ev.target.classList.contains('add-dep-select')) {
+        var val = ev.target.value;
+        if (!val) return;
+        var depsContainer = ev.target.closest('.form-group').querySelector('.dep-tags');
+        var tag = document.createElement('span');
+        tag.className = 'dep-tag';
+        tag.dataset.dep = val;
+        tag.innerHTML = esc(val) + ' <span class="remove-dep">&times;</span>';
+        depsContainer.appendChild(tag);
+        ev.target.value = '';
+        refreshDependencyOptions();
+    }
+    if (ev.target.classList.contains('layer-name-input')) {
+        refreshDependencyOptions();
+    }
+});
+
+document.getElementById('layerList').addEventListener('input', function(ev) {
+    if (ev.target.classList.contains('layer-name-input')) {
+        refreshDependencyOptions();
+    }
+});
+
+function renumberLayers() {
+    var nums = document.querySelectorAll('.layer-num');
+    for (var i = 0; i < nums.length; i++) nums[i].textContent = i + 1;
+}
+
+document.getElementById('btnAddLayer').addEventListener('click', function() {
+    addLayerCard('', {}, []);
+});
+
+// === Modal open/close ===
 function closeModal() { document.getElementById('modal').classList.remove('open'); }
 
-function openCreate() {
+document.getElementById('btnCancel').addEventListener('click', closeModal);
+document.getElementById('btnCloneCancel').addEventListener('click', function() {
+    document.getElementById('cloneModal').classList.remove('open');
+});
+
+document.getElementById('btnNewEssence').addEventListener('click', function() {
     document.getElementById('modalTitle').textContent = 'New Essence';
     document.getElementById('saveBtn').textContent = 'Create';
     document.getElementById('editId').value = '';
     document.getElementById('fName').value = '';
-    document.getElementById('fJson').value = '{"layers":{}}';
     document.getElementById('modalError').style.display = 'none';
-    loadAccounts();
+
+    // Reset base essence fields
+    document.getElementById('fProvider').value = 'Azure';
+    document.getElementById('fRegion').value = '';
+    document.getElementById('fBaseLoad').value = '';
+    document.getElementById('fUniqueId').value = '';
+    document.getElementById('fSchedule').value = '';
+    document.getElementById('fSubscription').value = '';
+
+    // Reset layers
+    document.getElementById('layerList').innerHTML = '';
+    layerCounter = 0;
+    document.getElementById('fJson').value = '{"layers":{}}';
+
+    // Reset to first tab
+    document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelector('[data-tab="base"]').classList.add('active');
+    document.getElementById('panel-base').classList.add('active');
+
+    loadAccountsDropdown();
     document.getElementById('modal').classList.add('open');
-}
+});
 
 function openEdit(e) {
     document.getElementById('modalTitle').textContent = 'Edit Essence';
     document.getElementById('saveBtn').textContent = 'Save';
     document.getElementById('editId').value = e.id;
     document.getElementById('fName').value = e.name;
-    document.getElementById('fJson').value = typeof e.essenceJson === 'string' ? e.essenceJson : JSON.stringify(e.essenceJson, null, 2);
     document.getElementById('modalError').style.display = 'none';
-    loadAccounts(e.cloudAccountId);
+
+    var jsonStr = typeof e.essenceJson === 'string' ? e.essenceJson : JSON.stringify(e.essenceJson, null, 2);
+    document.getElementById('fJson').value = jsonStr;
+
+    try { jsonToForm(JSON.parse(jsonStr)); } catch(ex) {}
+
+    // Reset to first tab
+    document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+    document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+    document.querySelector('[data-tab="base"]').classList.add('active');
+    document.getElementById('panel-base').classList.add('active');
+
+    loadAccountsDropdown(e.cloudAccountId);
     document.getElementById('modal').classList.add('open');
 }
 
-async function loadAccounts(selected) {
+async function loadAccountsDropdown(selected) {
     if (accounts.length === 0) {
-        const data = await api('/api/v1/cloud-accounts?limit=100');
-        if (data?.items) accounts = data.items;
+        var data = await api('/api/v1/cloud-accounts?limit=100');
+        if (data && data.items) accounts = data.items;
     }
-    const sel = document.getElementById('fAccount');
-    sel.innerHTML = accounts.map(a =>
-        `<option value="${a.id}" ${a.id === selected ? 'selected' : ''}>${a.label} (${a.provider})</option>`
-    ).join('');
+    var sel = document.getElementById('fAccount');
+    sel.innerHTML = accounts.map(function(a) {
+        return '<option value="' + a.id + '"' + (a.id === selected ? ' selected' : '') + '>' + esc(a.label) + ' (' + esc(a.provider) + ')</option>';
+    }).join('');
 }
 
-async function saveEssence(e) {
-    e.preventDefault();
-    const id = document.getElementById('editId').value;
-    const body = {
+// === Save ===
+document.getElementById('essenceForm').addEventListener('submit', function(ev) {
+    ev.preventDefault();
+
+    // Sync form to JSON if not on raw tab
+    var activeTab = document.querySelector('.tab.active');
+    if (!activeTab || activeTab.dataset.tab !== 'json') formToJson();
+
+    var id = document.getElementById('editId').value;
+    var jsonStr = document.getElementById('fJson').value;
+    var errEl = document.getElementById('modalError');
+
+    try { JSON.parse(jsonStr); } catch(e) {
+        errEl.textContent = 'Invalid JSON in essence definition';
+        errEl.style.display = 'block';
+        return;
+    }
+
+    var body = {
         name: document.getElementById('fName').value,
         cloudAccountId: document.getElementById('fAccount').value,
-        essenceJson: document.getElementById('fJson').value
+        essenceJson: jsonStr
     };
-    try {
-        JSON.parse(body.essenceJson);
-    } catch {
-        document.getElementById('modalError').textContent = 'Invalid JSON';
-        document.getElementById('modalError').style.display = 'block';
-        return false;
-    }
-    const res = id
-        ? await api(`/api/v1/essences/${id}`, { method: 'PUT', body: JSON.stringify(body) })
-        : await api('/api/v1/essences', { method: 'POST', body: JSON.stringify(body) });
-    if (res?.error) {
-        document.getElementById('modalError').textContent = res.message;
-        document.getElementById('modalError').style.display = 'block';
-        return false;
-    }
-    closeModal();
-    toast(id ? 'Essence updated' : 'Essence created');
-    loadEssences();
-    return false;
-}
 
+    (async function() {
+        var res = id
+            ? await api('/api/v1/essences/' + id, { method: 'PUT', body: JSON.stringify(body) })
+            : await api('/api/v1/essences', { method: 'POST', body: JSON.stringify(body) });
+        if (res && res.error) {
+            errEl.textContent = res.message;
+            errEl.style.display = 'block';
+            return;
+        }
+        closeModal();
+        toast(id ? 'Essence updated' : 'Essence created');
+        loadEssences();
+    })();
+});
+
+// === Clone ===
 function openClone(id, name) {
     document.getElementById('cloneId').value = id;
     document.getElementById('cloneName').value = name + ' (copy)';
@@ -151,51 +547,198 @@ function openClone(id, name) {
     document.getElementById('cloneModal').classList.add('open');
 }
 
-async function doClone(e) {
-    e.preventDefault();
-    const id = document.getElementById('cloneId').value;
-    const res = await api(`/api/v1/essences/${id}/clone`, {
-        method: 'POST',
-        body: JSON.stringify({ name: document.getElementById('cloneName').value })
-    });
-    if (res?.error) {
-        document.getElementById('cloneError').textContent = res.message;
-        document.getElementById('cloneError').style.display = 'block';
-        return false;
-    }
-    document.getElementById('cloneModal').classList.remove('open');
-    toast('Essence cloned');
-    loadEssences();
-    return false;
-}
+document.getElementById('cloneForm').addEventListener('submit', function(ev) {
+    ev.preventDefault();
+    var id = document.getElementById('cloneId').value;
+    (async function() {
+        var res = await api('/api/v1/essences/' + id + '/clone', {
+            method: 'POST',
+            body: JSON.stringify({ name: document.getElementById('cloneName').value })
+        });
+        if (res && res.error) {
+            document.getElementById('cloneError').textContent = res.message;
+            document.getElementById('cloneError').style.display = 'block';
+            return;
+        }
+        document.getElementById('cloneModal').classList.remove('open');
+        toast('Essence cloned');
+        loadEssences();
+    })();
+});
 
+// === Delete ===
 async function deleteEssence(id, name) {
-    if (!confirm(`Delete essence "${name}"?`)) return;
-    await api(`/api/v1/essences/${id}`, { method: 'DELETE' });
+    if (!confirm('Delete essence "' + name + '"?')) return;
+    await api('/api/v1/essences/' + id, { method: 'DELETE' });
     toast('Essence deleted');
     loadEssences();
 }
 
+// === List ===
 async function loadEssences() {
-    const data = await api('/api/v1/essences?limit=100');
+    var data = await api('/api/v1/essences?limit=100');
     if (!data || data.items.length === 0) {
         document.getElementById('content').innerHTML = '<div class="empty">No essences yet. Create your first one!</div>';
         return;
     }
-    document.getElementById('content').innerHTML = `<table><thead><tr>
-        <th>Name</th><th>Version</th><th>Cloud Account</th><th>Created</th><th>Actions</th>
-    </tr></thead><tbody>${data.items.map(e => `<tr>
-        <td>${e.name}</td>
-        <td>v${e.currentVersion}</td>
-        <td>${e.cloudAccountId.substring(0,8)}...</td>
-        <td>${new Date(e.createdAt).toLocaleDateString()}</td>
-        <td class="actions">
-            <button class="btn btn-primary btn-sm" onclick='openEdit(${JSON.stringify(e)})'>Edit</button>
-            <button class="btn btn-secondary btn-sm" onclick="openClone('${e.id}','${e.name.replace(/'/g,"\\'")}')">Clone</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteEssence('${e.id}','${e.name.replace(/'/g,"\\'")}')">Delete</button>
-        </td>
-    </tr>`).join('')}</tbody></table>`;
+
+    var html = '<table><thead><tr><th>Name</th><th>Version</th><th>Provider</th><th>Layers</th><th>Cloud Account</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
+    for (var i = 0; i < data.items.length; i++) {
+        var e = data.items[i];
+        var provider = '-';
+        var layerCount = 0;
+        try {
+            var ej = typeof e.essenceJson === 'string' ? JSON.parse(e.essenceJson) : e.essenceJson;
+            provider = (ej.baseEssence && ej.baseEssence.cloudProvider) || '-';
+            layerCount = ej.layers ? Object.keys(ej.layers).length : 0;
+        } catch(ex) {}
+
+        html += '<tr>' +
+            '<td><strong>' + esc(e.name) + '</strong></td>' +
+            '<td>v' + e.currentVersion + '</td>' +
+            '<td><span class="badge badge-info">' + esc(provider) + '</span></td>' +
+            '<td>' + layerCount + ' layer' + (layerCount !== 1 ? 's' : '') + '</td>' +
+            '<td>' + esc(e.cloudAccountId.substring(0,8)) + '...</td>' +
+            '<td>' + new Date(e.createdAt).toLocaleDateString() + '</td>' +
+            '<td class="actions">' +
+                '<button class="btn btn-primary btn-sm" data-action="edit" data-item="' + esc(btoa(JSON.stringify(e))) + '">Edit</button> ' +
+                '<button class="btn btn-secondary btn-sm" data-action="clone" data-id="' + e.id + '" data-name="' + esc(e.name) + '">Clone</button> ' +
+                '<button class="btn btn-danger btn-sm" data-action="delete" data-id="' + e.id + '" data-name="' + esc(e.name) + '">Delete</button>' +
+            '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    document.getElementById('content').innerHTML = html;
 }
 
 loadEssences();
+
+// === AI Generate ===
+var aiProviders = [];
+
+async function loadAiProviders() {
+    var data = await api('/api/v1/account/supported-providers');
+    if (data) aiProviders = data;
+}
+
+document.getElementById('btnAiGenerate').addEventListener('click', async function() {
+    if (aiProviders.length === 0) await loadAiProviders();
+
+    // Load accounts for the dropdown
+    if (accounts.length === 0) {
+        var data = await api('/api/v1/cloud-accounts?limit=100');
+        if (data && data.items) accounts = data.items;
+    }
+
+    var acctSel = document.getElementById('aiAccount');
+    acctSel.innerHTML = accounts.map(function(a) {
+        return '<option value="' + a.id + '">' + esc(a.label) + ' (' + esc(a.provider) + ')</option>';
+    }).join('');
+
+    var provSel = document.getElementById('aiProvider');
+    provSel.innerHTML = aiProviders.map(function(p) {
+        return '<option value="' + esc(p.name) + '">' + esc(p.label) + '</option>';
+    }).join('');
+
+    document.getElementById('aiPrompt').value = '';
+    document.getElementById('aiError').style.display = 'none';
+    document.getElementById('aiSuccess').style.display = 'none';
+    document.getElementById('aiStats').style.display = 'none';
+    document.getElementById('aiSubmitBtn').disabled = false;
+    document.getElementById('aiSubmitBtn').textContent = 'Generate Essence';
+    document.getElementById('aiModal').classList.add('open');
+});
+
+document.getElementById('btnAiCancel').addEventListener('click', function() {
+    document.getElementById('aiModal').classList.remove('open');
+});
+
+document.getElementById('aiForm').addEventListener('submit', function(ev) {
+    ev.preventDefault();
+    var prompt = document.getElementById('aiPrompt').value.trim();
+    var accountId = document.getElementById('aiAccount').value;
+    var provider = document.getElementById('aiProvider').value;
+    var errEl = document.getElementById('aiError');
+    var successEl = document.getElementById('aiSuccess');
+    var statsEl = document.getElementById('aiStats');
+    var btn = document.getElementById('aiSubmitBtn');
+
+    errEl.style.display = 'none';
+    successEl.style.display = 'none';
+    statsEl.style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+
+    (async function() {
+        var res = await api('/api/v1/essences/generate', {
+            method: 'POST',
+            body: JSON.stringify({ prompt: prompt, cloudAccountId: accountId, provider: provider })
+        });
+
+        btn.disabled = false;
+        btn.textContent = 'Generate Essence';
+
+        if (!res) return;
+
+        if (res.error) {
+            errEl.textContent = res.message;
+            errEl.style.display = 'block';
+            return;
+        }
+
+        // Show stats
+        var statsText = 'Tokens: ' + res.inputTokens + ' in / ' + res.outputTokens + ' out · ' +
+            res.iterations + ' iteration(s) · ' + res.durationMs + 'ms · Model: ' + esc(res.model);
+        document.getElementById('aiStatsText').textContent = statsText;
+        statsEl.style.display = 'block';
+
+        successEl.textContent = 'Essence generated! Opening editor...';
+        successEl.style.display = 'block';
+
+        // Close AI modal and open the Create Essence modal with generated JSON
+        setTimeout(function() {
+            document.getElementById('aiModal').classList.remove('open');
+
+            // Open create modal with generated data
+            document.getElementById('modalTitle').textContent = 'New Essence (AI Generated)';
+            document.getElementById('saveBtn').textContent = 'Create';
+            document.getElementById('editId').value = '';
+            document.getElementById('fName').value = 'AI: ' + prompt.substring(0, 50);
+            document.getElementById('modalError').style.display = 'none';
+
+            // Set JSON and sync to form
+            var jsonStr = res.essenceJson;
+            try {
+                jsonStr = JSON.stringify(JSON.parse(jsonStr), null, 2);
+            } catch(e) {}
+            document.getElementById('fJson').value = jsonStr;
+
+            try { jsonToForm(JSON.parse(jsonStr)); } catch(e) {}
+
+            // Reset to first tab
+            document.querySelectorAll('.tab').forEach(function(t) { t.classList.remove('active'); });
+            document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
+            document.querySelector('[data-tab="base"]').classList.add('active');
+            document.getElementById('panel-base').classList.add('active');
+
+            loadAccountsDropdown();
+            if (accountId) {
+                setTimeout(function() {
+                    document.getElementById('fAccount').value = accountId;
+                }, 100);
+            }
+            document.getElementById('modal').classList.add('open');
+        }, 1000);
+    })();
+});
+
+// === Content event delegation ===
+document.getElementById('content').addEventListener('click', function(ev) {
+    var el = ev.target.closest('[data-action]');
+    if (!el) return;
+    var action = el.dataset.action;
+    if (action === 'edit') openEdit(JSON.parse(atob(el.dataset.item)));
+    else if (action === 'clone') openClone(el.dataset.id, el.dataset.name);
+    else if (action === 'delete') deleteEssence(el.dataset.id, el.dataset.name);
+});
 </script>

@@ -12,6 +12,11 @@ public class DeploymentRun : TenantScopedEntity
     public DateTime? CompletedAt { get; set; }
 
     /// <summary>
+    /// Estimated cloud cost (USD) for this run, computed and frozen when the run reaches a terminal state.
+    /// </summary>
+    public decimal? EstimatedCostUsd { get; set; }
+
+    /// <summary>
     /// W3C traceparent header for distributed trace propagation across the DB queue boundary.
     /// </summary>
     public string? TraceParent { get; set; }

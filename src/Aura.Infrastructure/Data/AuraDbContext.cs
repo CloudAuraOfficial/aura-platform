@@ -32,6 +32,8 @@ public class AuraDbContext : DbContext
     public DbSet<Experiment> Experiments => Set<Experiment>();
     public DbSet<ExperimentAssignment> ExperimentAssignments => Set<ExperimentAssignment>();
     public DbSet<ExperimentEvent> ExperimentEvents => Set<ExperimentEvent>();
+    public DbSet<UserAiProvider> UserAiProviders => Set<UserAiProvider>();
+    public DbSet<AiGenerationLog> AiGenerationLogs => Set<AiGenerationLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -41,6 +43,9 @@ public class AuraDbContext : DbContext
         modelBuilder.Entity<Essence>().HasQueryFilter(e => e.TenantId == _tenantId);
         modelBuilder.Entity<Deployment>().HasQueryFilter(e => e.TenantId == _tenantId);
         modelBuilder.Entity<DeploymentRun>().HasQueryFilter(e => e.TenantId == _tenantId);
+        modelBuilder.Entity<Experiment>().HasQueryFilter(e => e.TenantId == _tenantId);
+        modelBuilder.Entity<UserAiProvider>().HasQueryFilter(e => e.TenantId == _tenantId);
+        modelBuilder.Entity<AiGenerationLog>().HasQueryFilter(e => e.TenantId == _tenantId);
 
         // Tenant
         modelBuilder.Entity<Tenant>(b =>
@@ -73,6 +78,7 @@ public class AuraDbContext : DbContext
         {
             b.Property(r => r.SnapshotJson).HasColumnType("jsonb");
             b.Property(r => r.Status).HasConversion<string>();
+            b.Property(r => r.EstimatedCostUsd).HasPrecision(18, 4);
         });
 
         // AuditLogEntry
@@ -103,7 +109,7 @@ public class AuraDbContext : DbContext
         {
             b.Property(e => e.Variants).HasColumnType("jsonb");
             b.Property(e => e.Status).HasConversion<string>();
-            b.HasIndex(e => new { e.Project, e.Status });
+            b.HasIndex(e => new { e.TenantId, e.Project, e.Status });
         });
 
         // ExperimentAssignment
@@ -117,6 +123,12 @@ public class AuraDbContext : DbContext
         {
             b.Property(e => e.Metadata).HasColumnType("jsonb");
             b.HasIndex(e => new { e.ExperimentId, e.VariantId });
+        });
+
+        // UserAiProvider
+        modelBuilder.Entity<UserAiProvider>(b =>
+        {
+            b.HasIndex(p => new { p.TenantId, p.UserId, p.ProviderName }).IsUnique();
         });
     }
 

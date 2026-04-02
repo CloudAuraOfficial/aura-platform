@@ -288,6 +288,10 @@ public class RunWorkerService : BackgroundService
         activity?.SetTag("deployment.status", run.Status.ToString());
         if (failed)
             activity?.SetStatus(ActivityStatusCode.Error, "One or more layers failed");
+
+        // Materialize cost estimate on the run for fast dashboard aggregation
+        run.EstimatedCostUsd = ComputeRunCost(run);
+
         await db.SaveChangesAsync(ct);
 
         runStopwatch.Stop();
@@ -378,6 +382,8 @@ public class RunWorkerService : BackgroundService
                 layer.Output = "Reaped: run exceeded stale threshold.";
                 layer.CompletedAt = DateTime.UtcNow;
             }
+
+            run.EstimatedCostUsd = ComputeRunCost(run);
         }
 
         await db.SaveChangesAsync(ct);
@@ -446,6 +452,28 @@ public class RunWorkerService : BackgroundService
         ExecutorType.EmissionLoad => sp.GetRequiredService<EmissionLoadExecutor>(),
         _ => throw new InvalidOperationException($"Unknown executor type: {type}")
     };
+
+    private static decimal ComputeRunCost(DeploymentRun run)
+    {
+        var layerInputs = run.Layers.Select(l =>
+        {
+            var durationSeconds = 0m;
+            if (l.StartedAt.HasValue && l.CompletedAt.HasValue)
+                durationSeconds = (decimal)(l.CompletedAt.Value - l.StartedAt.Value).TotalSeconds;
+
+            JsonElement? parameters = null;
+            try
+            {
+                using var doc = JsonDocument.Parse(l.Parameters);
+                parameters = doc.RootElement.Clone();
+            }
+            catch { }
+
+            return new LayerCostInput(l.LayerName, l.OperationType, durationSeconds, parameters);
+        }).ToList();
+
+        return AzureCostEstimator.EstimateRunCost(layerInputs).TotalEstimatedCost;
+    }
 
     private static string ExtractOperationType(string? parametersJson)
     {

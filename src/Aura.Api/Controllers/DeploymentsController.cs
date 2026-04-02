@@ -4,6 +4,8 @@ using Aura.Core.Entities;
 using Aura.Core.Enums;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
+using Aura.Api.Services;
+using Aura.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,13 +20,16 @@ public class DeploymentsController : ControllerBase
     private readonly AuraDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly IDeploymentOrchestrationService _orchestration;
+    private readonly PreflightValidationService _preflight;
 
     public DeploymentsController(
-        AuraDbContext db, ITenantContext tenant, IDeploymentOrchestrationService orchestration)
+        AuraDbContext db, ITenantContext tenant, IDeploymentOrchestrationService orchestration,
+        PreflightValidationService preflight)
     {
         _db = db;
         _tenant = tenant;
         _orchestration = orchestration;
+        _preflight = preflight;
     }
 
     [HttpGet]
@@ -134,6 +139,17 @@ public class DeploymentsController : ControllerBase
         return NoContent();
     }
 
+    [HttpPost("{id:guid}/validate")]
+    public async Task<IActionResult> Validate(Guid id)
+    {
+        var deployment = await _db.Deployments.FindAsync(id);
+        if (deployment is null)
+            return NotFound(new ErrorResponse("not_found", "Deployment not found.", 404));
+
+        var result = await _preflight.ValidateAsync(deployment);
+        return Ok(result);
+    }
+
     [HttpPost("{id:guid}/runs")]
     public async Task<IActionResult> CreateRun(Guid id)
     {
@@ -212,6 +228,37 @@ public class DeploymentsController : ControllerBase
         return Ok(ToRunDto(run));
     }
 
+    [HttpGet("{id:guid}/runs/{runId:guid}/cost")]
+    public async Task<IActionResult> GetRunCost(Guid id, Guid runId)
+    {
+        var run = await _db.DeploymentRuns
+            .Include(r => r.Layers.OrderBy(l => l.SortOrder))
+            .FirstOrDefaultAsync(r => r.Id == runId && r.DeploymentId == id);
+
+        if (run is null)
+            return NotFound(new ErrorResponse("not_found", "Run not found.", 404));
+
+        var layerInputs = run.Layers.Select(l =>
+        {
+            var durationSeconds = 0m;
+            if (l.StartedAt.HasValue && l.CompletedAt.HasValue)
+                durationSeconds = (decimal)(l.CompletedAt.Value - l.StartedAt.Value).TotalSeconds;
+
+            System.Text.Json.JsonElement? parameters = null;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(l.Parameters);
+                parameters = doc.RootElement.Clone();
+            }
+            catch { }
+
+            return new LayerCostInput(l.LayerName, l.OperationType, durationSeconds, parameters);
+        }).ToList();
+
+        var estimate = AzureCostEstimator.EstimateRunCost(layerInputs);
+        return Ok(estimate);
+    }
+
     [HttpGet("{id:guid}/runs/{runId:guid}/layers")]
     public async Task<IActionResult> ListLayers(Guid id, Guid runId)
     {
@@ -233,7 +280,7 @@ public class DeploymentsController : ControllerBase
     private static DeploymentRunResponse ToRunDto(DeploymentRun r) =>
         new(r.Id, r.DeploymentId, r.Status.ToString(), r.SnapshotJson,
             r.Layers.OrderBy(l => l.SortOrder).Select(ToLayerDto).ToList(),
-            r.StartedAt, r.CompletedAt, r.CreatedAt);
+            r.StartedAt, r.CompletedAt, r.CreatedAt, r.EstimatedCostUsd);
 
     private static DeploymentLayerResponse ToLayerDto(DeploymentLayer l) =>
         new(l.Id, l.LayerName, l.ExecutorType.ToString(), l.Status.ToString(),
