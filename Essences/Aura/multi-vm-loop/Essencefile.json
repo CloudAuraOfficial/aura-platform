@@ -11,7 +11,7 @@
       "isEnabled": true,
       "operationType": "CreateResourceGroup",
       "parameters": {
-        "resourceGroup": "aura-multi-vm-rg",
+        "resourceGroupName": "aura-multi-vm-rg",
         "location": "eastus"
       },
       "_approach": "Create the resource group for all VMs"
@@ -82,7 +82,7 @@
       "operationType": "DeleteResourceGroup",
       "dependsOn": ["delete-vm-0-0", "delete-vm-0-1", "delete-vm-1-0", "delete-vm-1-1"],
       "parameters": {
-        "resourceGroup": "aura-multi-vm-rg"
+        "resourceGroupName": "aura-multi-vm-rg"
       },
       "_approach": "Delete the resource group after all VMs are removed"
     }

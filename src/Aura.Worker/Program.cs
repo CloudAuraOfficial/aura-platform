@@ -73,6 +73,7 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<StopVMHandler>();
     services.AddTransient<DeleteVMHandler>();
     services.AddTransient<DeployArmTemplateHandler>();
+    services.AddTransient<DeleteResourceGroupHandler>();
     services.AddHttpClient();
 
     // Operation registry
@@ -91,6 +92,7 @@ builder.ConfigureServices((context, services) =>
     registry.Register<StopVMHandler>("StopVM");
     registry.Register<DeleteVMHandler>("DeleteVM");
     registry.Register<DeployArmTemplateHandler>("DeployArmTemplate");
+    registry.Register<DeleteResourceGroupHandler>("DeleteResourceGroup");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
@@ -115,15 +117,20 @@ builder.ConfigureServices((context, services) =>
                 opts.Endpoint = new Uri(otelEndpoint);
             }));
 
-    // Redis + log streaming
+    // H5: Redis with optional authentication
     var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "localhost";
     var redisPort = Environment.GetEnvironmentVariable("REDIS_PORT") ?? "6379";
+    var redisPassword = Environment.GetEnvironmentVariable("REDIS_PASSWORD") ?? "";
+    var redisConnStr = string.IsNullOrEmpty(redisPassword)
+        ? $"{redisHost}:{redisPort},abortConnect=false"
+        : $"{redisHost}:{redisPort},password={redisPassword},abortConnect=false";
     services.AddSingleton<IConnectionMultiplexer>(
-        ConnectionMultiplexer.Connect($"{redisHost}:{redisPort},abortConnect=false"));
+        ConnectionMultiplexer.Connect(redisConnStr));
     services.AddSingleton<ILogStreamService, RedisLogStreamService>();
 
     // Orchestration (used by scheduler to create runs)
     services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
+    services.AddScoped<IExperimentService, ExperimentService>();
 
     // Tenant context (worker uses unscoped / IgnoreQueryFilters)
     services.AddSingleton<ITenantContext, WorkerTenantContext>();
