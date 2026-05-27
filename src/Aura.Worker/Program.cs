@@ -83,6 +83,8 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<StartEc2InstanceHandler>();
     services.AddTransient<StopEc2InstanceHandler>();
     services.AddTransient<TerminateEc2InstanceHandler>();
+    services.AddTransient<CreateS3BucketHandler>();
+    services.AddTransient<DeleteS3BucketHandler>();
 
     services.AddHttpClient();
 
@@ -109,6 +111,8 @@ builder.ConfigureServices((context, services) =>
     registry.Register<StartEc2InstanceHandler>("StartEc2Instance");
     registry.Register<StopEc2InstanceHandler>("StopEc2Instance");
     registry.Register<TerminateEc2InstanceHandler>("TerminateEc2Instance");
+    registry.Register<CreateS3BucketHandler>("CreateS3Bucket");
+    registry.Register<DeleteS3BucketHandler>("DeleteS3Bucket");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
