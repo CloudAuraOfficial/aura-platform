@@ -5,6 +5,7 @@ using Aura.Infrastructure.Services;
 using Aura.Worker.Executors;
 using Aura.Worker.Operations;
 using Aura.Worker.Operations.Azure;
+using Aura.Worker.Operations.Aws;
 using Aura.Worker.Operations.Common;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
@@ -74,6 +75,10 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<DeleteVMHandler>();
     services.AddTransient<DeployArmTemplateHandler>();
     services.AddTransient<DeleteResourceGroupHandler>();
+
+    // AWS handlers (Epic 1)
+    services.AddTransient<CreateVpcHandler>();
+
     services.AddHttpClient();
 
     // Operation registry
@@ -93,6 +98,7 @@ builder.ConfigureServices((context, services) =>
     registry.Register<DeleteVMHandler>("DeleteVM");
     registry.Register<DeployArmTemplateHandler>("DeployArmTemplate");
     registry.Register<DeleteResourceGroupHandler>("DeleteResourceGroup");
+    registry.Register<CreateVpcHandler>("CreateVpc");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
