@@ -39,6 +39,7 @@ public class AiEssenceBuilderService
               "parameters": { ... },
               "dependsOn": ["<other layer names>"],
               "scriptPath": "<optional path to script>",
+              "cloudAccountId": "<optional uuid — overrides the Essence-level CloudAccount for this layer; lets one Essence span multiple subscriptions or providers>",
               "_approach": "<optional description of what this layer does>"
             }
           }
@@ -82,6 +83,7 @@ public class AiEssenceBuilderService
               "parameters": { ... },
               "dependsOn": ["<other layer names>"],
               "scriptPath": "<optional path to script>",
+              "cloudAccountId": "<optional uuid — overrides the Essence-level CloudAccount for this layer; lets one Essence span multiple subscriptions or providers>",
               "_approach": "<optional description of what this layer does>"
             }
           }
@@ -123,6 +125,7 @@ public class AiEssenceBuilderService
               "parameters": { ... },
               "dependsOn": ["<other layer names>"],
               "scriptPath": "<optional path to script>",
+              "cloudAccountId": "<optional uuid — overrides the Essence-level CloudAccount for this layer; lets one Essence span multiple subscriptions or providers>",
               "_approach": "<optional description of what this layer does>"
             }
           }
