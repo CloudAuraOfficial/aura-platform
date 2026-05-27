@@ -143,7 +143,7 @@ public class RunWorkerService : BackgroundService
         var crypto = scope.ServiceProvider.GetRequiredService<ICryptoService>();
         var webhookService = scope.ServiceProvider.GetRequiredService<WebhookService>();
         var logStream = scope.ServiceProvider.GetRequiredService<ILogStreamService>();
-        var costEstimator = scope.ServiceProvider.GetRequiredService<ICloudCostEstimator>();
+        var estimatorFactory = scope.ServiceProvider.GetRequiredService<ICloudCostEstimatorFactory>();
 
         var run = await db.DeploymentRuns
             .IgnoreQueryFilters()
@@ -291,7 +291,7 @@ public class RunWorkerService : BackgroundService
             activity?.SetStatus(ActivityStatusCode.Error, "One or more layers failed");
 
         // Materialize cost estimate on the run for fast dashboard aggregation
-        run.EstimatedCostUsd = ComputeRunCost(run, costEstimator);
+        run.EstimatedCostUsd = ComputeRunCost(run, estimatorFactory.For(ResolveProvider(run)));
 
         await db.SaveChangesAsync(ct);
 
@@ -357,7 +357,7 @@ public class RunWorkerService : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AuraDbContext>();
-        var costEstimator = scope.ServiceProvider.GetRequiredService<ICloudCostEstimator>();
+        var estimatorFactory = scope.ServiceProvider.GetRequiredService<ICloudCostEstimatorFactory>();
 
         var threshold = DateTime.UtcNow.AddSeconds(-_staleThresholdSeconds);
         var staleRuns = await db.DeploymentRuns
@@ -385,7 +385,7 @@ public class RunWorkerService : BackgroundService
                 layer.CompletedAt = DateTime.UtcNow;
             }
 
-            run.EstimatedCostUsd = ComputeRunCost(run, costEstimator);
+            run.EstimatedCostUsd = ComputeRunCost(run, estimatorFactory.For(ResolveProvider(run)));
         }
 
         await db.SaveChangesAsync(ct);
@@ -454,6 +454,27 @@ public class RunWorkerService : BackgroundService
         ExecutorType.EmissionLoad => sp.GetRequiredService<EmissionLoadExecutor>(),
         _ => throw new InvalidOperationException($"Unknown executor type: {type}")
     };
+
+    private static CloudProvider ResolveProvider(DeploymentRun run)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(run.SnapshotJson);
+            if (doc.RootElement.TryGetProperty("baseEssence", out var baseEssence)
+                && baseEssence.TryGetProperty("cloudProvider", out var cp)
+                && cp.ValueKind == JsonValueKind.String)
+            {
+                return cp.GetString()?.ToLowerInvariant() switch
+                {
+                    "aws" => CloudProvider.Aws,
+                    "gcp" => CloudProvider.Gcp,
+                    _     => CloudProvider.Azure,
+                };
+            }
+        }
+        catch { }
+        return CloudProvider.Azure;
+    }
 
     private static decimal ComputeRunCost(DeploymentRun run, ICloudCostEstimator costEstimator)
     {

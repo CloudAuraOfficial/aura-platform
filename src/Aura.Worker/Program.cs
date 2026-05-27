@@ -154,8 +154,10 @@ builder.ConfigureServices((context, services) =>
         ConnectionMultiplexer.Connect(redisConnStr));
     services.AddSingleton<ILogStreamService, RedisLogStreamService>();
 
-    // Cloud cost estimator (provider-specific; Epic 1/2 will add AWS/GCP impls)
+    // Cloud cost estimators — factory selects per run's CloudProvider
     services.AddSingleton<ICloudCostEstimator, AzureCostEstimator>();
+    services.AddSingleton<ICloudCostEstimator, AwsCostEstimator>();
+    services.AddSingleton<ICloudCostEstimatorFactory, CloudCostEstimatorFactory>();
 
     // Orchestration (used by scheduler to create runs)
     services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();

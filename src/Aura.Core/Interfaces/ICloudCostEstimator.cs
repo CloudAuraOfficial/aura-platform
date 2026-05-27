@@ -13,3 +13,14 @@ public interface ICloudCostEstimator
     CloudProvider Provider { get; }
     RunCostEstimate EstimateRunCost(IEnumerable<LayerCostInput> layers);
 }
+
+/// <summary>
+/// Selects the right ICloudCostEstimator for a given CloudProvider. Lives in
+/// Aura.Core so both Api and Worker can inject it without leaking the
+/// concrete impls. Falls back to Azure when an estimator isn't registered —
+/// preserves prior single-provider behavior.
+/// </summary>
+public interface ICloudCostEstimatorFactory
+{
+    ICloudCostEstimator For(CloudProvider provider);
+}

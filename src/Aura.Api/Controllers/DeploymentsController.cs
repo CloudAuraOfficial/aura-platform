@@ -21,17 +21,17 @@ public class DeploymentsController : ControllerBase
     private readonly ITenantContext _tenant;
     private readonly IDeploymentOrchestrationService _orchestration;
     private readonly PreflightValidationService _preflight;
-    private readonly ICloudCostEstimator _costEstimator;
+    private readonly ICloudCostEstimatorFactory _estimatorFactory;
 
     public DeploymentsController(
         AuraDbContext db, ITenantContext tenant, IDeploymentOrchestrationService orchestration,
-        PreflightValidationService preflight, ICloudCostEstimator costEstimator)
+        PreflightValidationService preflight, ICloudCostEstimatorFactory estimatorFactory)
     {
         _db = db;
         _tenant = tenant;
         _orchestration = orchestration;
         _preflight = preflight;
-        _costEstimator = costEstimator;
+        _estimatorFactory = estimatorFactory;
     }
 
     [HttpGet]
@@ -257,7 +257,7 @@ public class DeploymentsController : ControllerBase
             return new LayerCostInput(l.LayerName, l.OperationType, durationSeconds, parameters);
         }).ToList();
 
-        var estimate = _costEstimator.EstimateRunCost(layerInputs);
+        var estimate = _estimatorFactory.For(ResolveProvider(run)).EstimateRunCost(layerInputs);
         return Ok(estimate);
     }
 
@@ -274,6 +274,27 @@ public class DeploymentsController : ControllerBase
             .ToListAsync();
 
         return Ok(layers.Select(ToLayerDto).ToList());
+    }
+
+    private static CloudProvider ResolveProvider(DeploymentRun run)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(run.SnapshotJson);
+            if (doc.RootElement.TryGetProperty("baseEssence", out var baseEssence)
+                && baseEssence.TryGetProperty("cloudProvider", out var cp)
+                && cp.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                return cp.GetString()?.ToLowerInvariant() switch
+                {
+                    "aws" => CloudProvider.Aws,
+                    "gcp" => CloudProvider.Gcp,
+                    _     => CloudProvider.Azure,
+                };
+            }
+        }
+        catch { }
+        return CloudProvider.Azure;
     }
 
     private static DeploymentResponse ToDto(Deployment d) =>
