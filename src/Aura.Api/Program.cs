@@ -100,16 +100,6 @@ builder.Services.AddRateLimiter(options =>
                 PermitLimit = 10,
                 Window = TimeSpan.FromMinutes(1)
             }));
-
-    // M2: Strict rate limit for deploy webhook
-    options.AddPolicy("deploy", context =>
-        RateLimitPartition.GetFixedWindowLimiter(
-            context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 5,
-                Window = TimeSpan.FromHours(1)
-            }));
 });
 
 // DI
@@ -205,45 +195,6 @@ app.UseStatusCodePagesWithReExecute("/error/{0}");
 // Health endpoint
 app.MapGet("/health", () => Results.Ok(new { Status = "healthy", Timestamp = DateTime.UtcNow }));
 app.MapMethods("/health", new[] { "HEAD" }, () => Results.Ok());
-
-// Internal deploy webhook — triggers git pull + rebuild on the VPS
-var deploySecret = Environment.GetEnvironmentVariable("DEPLOY_WEBHOOK_SECRET");
-app.MapPost("/api/internal/deploy", (HttpContext ctx) =>
-{
-    if (string.IsNullOrEmpty(deploySecret))
-        return Results.NotFound();
-
-    var authHeader = ctx.Request.Headers.Authorization.FirstOrDefault();
-    if (authHeader is null || !authHeader.StartsWith("Bearer ") || authHeader[7..] != deploySecret)
-        return Results.Unauthorized();
-
-    // Fire-and-forget: run deploy script in background
-    _ = Task.Run(() =>
-    {
-        try
-        {
-            var scriptPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "scripts", "deploy.sh");
-            // Fallback: look in home directory
-            if (!File.Exists(scriptPath))
-                scriptPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                    "aura-platform", "scripts", "deploy.sh");
-
-            if (File.Exists(scriptPath))
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo("bash", scriptPath)
-                {
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false
-                };
-                System.Diagnostics.Process.Start(psi);
-            }
-        }
-        catch { /* best-effort */ }
-    });
-
-    return Results.Ok(new { Status = "deploy_triggered", Timestamp = DateTime.UtcNow });
-}).RequireRateLimiting("deploy");
 
 // Prometheus metrics endpoint
 app.UseHttpMetrics();

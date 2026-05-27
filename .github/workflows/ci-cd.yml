@@ -1,5 +1,10 @@
 name: CI/CD
 
+# Deploy is handled out-of-band by a host-side cron watcher on the VPS:
+# /home/rogerclaude/aura-deploy-watch.sh polls .deployed-sha vs HEAD every
+# minute and runs scripts/deploy.sh when they diverge. CI's only job is
+# to gate bad code from reaching main.
+
 on:
   push:
     branches: [main]
@@ -28,49 +33,3 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
-
-  deploy:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Trigger deploy via webhook
-        run: |
-          curl -sf -X POST \
-            "https://platform.cloudaura.cloud/api/internal/deploy" \
-            -H "Authorization: Bearer ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \
-            -H "Content-Type: application/json" \
-            -d '{"ref": "${{ github.sha }}"}' \
-            --max-time 120 \
-            || echo "WARNING: deploy webhook failed or timed out"
-        continue-on-error: true
-
-  smoke-test:
-    needs: deploy
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    steps:
-      - name: Wait for deploy to settle
-        run: sleep 30
-
-      - name: Health check
-        run: |
-          HTTP_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
-            "https://platform.cloudaura.cloud/health" --max-time 10) || true
-          echo "Health check status: $HTTP_STATUS"
-          if [ "$HTTP_STATUS" != "200" ]; then
-            echo "WARNING: health check returned $HTTP_STATUS"
-          fi
-
-      - name: Login smoke test
-        run: |
-          HTTP_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
-            -X POST "https://platform.cloudaura.cloud/api/v1/auth/login" \
-            -H "Content-Type: application/json" \
-            -d '{"email":"smoke@test.invalid","password":"NotARealPassword1!"}' \
-            --max-time 10) || true
-          echo "Login endpoint status: $HTTP_STATUS"
-          # 401 = endpoint is alive and rejecting invalid creds (expected)
-          if [ "$HTTP_STATUS" != "401" ]; then
-            echo "WARNING: expected 401, got $HTTP_STATUS"
-          fi
