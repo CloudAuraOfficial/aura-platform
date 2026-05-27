@@ -1,0 +1,71 @@
+{
+  "baseEssence": {
+    "EssenceName": "MultiCloudAzureAwsGcp",
+    "EssenceID": "c1d2e3f4-1111-2222-3333-444455556666",
+    "_comment": "Epic 3 demo: one Essence spanning Azure + AWS + GCP. Each layer pins its own cloudAccountId.",
+    "_fallbackBehavior": "Layers without cloudAccountId would inherit Essence-level. Here every layer is explicit since the providers differ per layer.",
+    "uniqueId": "aura-multicloud-demo"
+  },
+  "layers": {
+    "AzureResourceGroup": {
+      "isEnabled": true,
+      "operationType": "CreateResourceGroup",
+      "cloudAccountId": "00000000-aaaa-0000-0000-000000000001",
+      "parameters": {
+        "resourceGroupName": "aura-multicloud-rg",
+        "location": "eastus"
+      }
+    },
+    "AwsBucket": {
+      "isEnabled": true,
+      "operationType": "CreateS3Bucket",
+      "cloudAccountId": "00000000-bbbb-0000-0000-000000000002",
+      "parameters": {
+        "bucketName": "aura-multicloud-${BYOS_AWS_ACCOUNT_ID}-bucket",
+        "versioning": true,
+        "publicAccessBlock": true
+      }
+    },
+    "GcpCloudRunService": {
+      "isEnabled": true,
+      "operationType": "DeployCloudRunService",
+      "cloudAccountId": "00000000-cccc-0000-0000-000000000003",
+      "parameters": {
+        "serviceName": "aura-multicloud-hello",
+        "region": "us-central1",
+        "image": "us-docker.pkg.dev/cloudrun/container/hello",
+        "port": 8080
+      },
+      "dependsOn": ["AzureResourceGroup", "AwsBucket"]
+    },
+    "CrossCloudHealthCheck": {
+      "isEnabled": true,
+      "operationType": "HttpHealthCheck",
+      "parameters": {
+        "url": "https://example.com",
+        "expectedStatus": 200,
+        "timeoutSeconds": 30
+      },
+      "dependsOn": ["GcpCloudRunService"]
+    },
+    "AwsBucketTeardown": {
+      "isEnabled": true,
+      "operationType": "DeleteS3Bucket",
+      "cloudAccountId": "00000000-bbbb-0000-0000-000000000002",
+      "parameters": {
+        "bucketName": "aura-multicloud-${BYOS_AWS_ACCOUNT_ID}-bucket",
+        "force": true
+      },
+      "dependsOn": ["CrossCloudHealthCheck"]
+    },
+    "AzureResourceGroupTeardown": {
+      "isEnabled": true,
+      "operationType": "DeleteResourceGroup",
+      "cloudAccountId": "00000000-aaaa-0000-0000-000000000001",
+      "parameters": {
+        "resourceGroupName": "aura-multicloud-rg"
+      },
+      "dependsOn": ["CrossCloudHealthCheck"]
+    }
+  }
+}
