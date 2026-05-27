@@ -2,7 +2,7 @@
 
 #nullable disable
 
-namespace Aura.Infrastructure.Migrations2
+namespace Aura.Infrastructure.Migrations
 {
     /// <inheritdoc />
     public partial class AddEstimatedCostToDeploymentRun : Migration

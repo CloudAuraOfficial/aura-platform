@@ -1,20 +1,19 @@
-using System;
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace Aura.Infrastructure.Migrations2
+namespace Aura.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class AddLayerCloudAccountId : Migration
+    public partial class AddEmissionLoadImageToDeploymentLayer : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<Guid>(
-                name: "CloudAccountId",
+            migrationBuilder.AddColumn<string>(
+                name: "EmissionLoadImage",
                 table: "DeploymentLayers",
-                type: "uuid",
+                type: "text",
                 nullable: true);
         }
 
@@ -22,7 +21,7 @@ namespace Aura.Infrastructure.Migrations2
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "CloudAccountId",
+                name: "EmissionLoadImage",
                 table: "DeploymentLayers");
         }
     }

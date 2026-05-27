@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace Aura.Infrastructure.Migrations2
+namespace Aura.Infrastructure.Migrations
 {
     /// <summary>
     /// Snapshot-only cleanup migration — Up/Down are intentionally empty.

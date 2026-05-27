@@ -9,11 +9,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Aura.Infrastructure.Migrations2
+namespace Aura.Infrastructure.Migrations
 {
     [DbContext(typeof(AuraDbContext))]
-    [Migration("20260312031301_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260330203441_AddEmissionLoadImageToDeploymentLayer")]
+    partial class AddEmissionLoadImageToDeploymentLayer
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -24,6 +24,44 @@ namespace Aura.Infrastructure.Migrations2
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
+
+            modelBuilder.Entity("Aura.Core.Entities.AuditLogEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Detail")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("EntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "EntityType", "EntityId");
+
+                    b.ToTable("AuditLog");
+                });
 
             modelBuilder.Entity("Aura.Core.Entities.CloudAccount", b =>
                 {
@@ -109,12 +147,18 @@ namespace Aura.Infrastructure.Migrations2
                         .IsRequired()
                         .HasColumnType("jsonb");
 
+                    b.Property<string>("EmissionLoadImage")
+                        .HasColumnType("text");
+
                     b.Property<string>("ExecutorType")
                         .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("LayerName")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("OperationType")
                         .HasColumnType("text");
 
                     b.Property<string>("Output")
@@ -197,6 +241,9 @@ namespace Aura.Infrastructure.Migrations2
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("CurrentVersion")
+                        .HasColumnType("integer");
+
                     b.Property<string>("EssenceJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -218,6 +265,150 @@ namespace Aura.Infrastructure.Migrations2
                     b.HasIndex("TenantId");
 
                     b.ToTable("Essences");
+                });
+
+            modelBuilder.Entity("Aura.Core.Entities.EssenceVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("ChangedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("EssenceId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("EssenceJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EssenceId", "VersionNumber")
+                        .IsUnique();
+
+                    b.ToTable("EssenceVersions");
+                });
+
+            modelBuilder.Entity("Aura.Core.Entities.Experiment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ConcludedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Conclusion")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Hypothesis")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("MetricName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Project")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("StartedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Variants")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Project", "Status");
+
+                    b.ToTable("Experiments");
+                });
+
+            modelBuilder.Entity("Aura.Core.Entities.ExperimentAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ExperimentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SubjectHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("VariantId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExperimentId", "SubjectHash")
+                        .IsUnique();
+
+                    b.ToTable("ExperimentAssignments");
+                });
+
+            modelBuilder.Entity("Aura.Core.Entities.ExperimentEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ExperimentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Metadata")
+                        .HasColumnType("jsonb");
+
+                    b.Property<string>("MetricName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<double>("MetricValue")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("SubjectHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("VariantId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExperimentId", "VariantId");
+
+                    b.ToTable("ExperimentEvents");
                 });
 
             modelBuilder.Entity("Aura.Core.Entities.Tenant", b =>
@@ -258,9 +449,30 @@ namespace Aura.Infrastructure.Migrations2
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<int>("FailedLoginAttempts")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("InviteToken")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("InviteTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsDisabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("LockedUntil")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("PasswordHash")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<string>("RefreshToken")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("RefreshTokenExpiresAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Role")
                         .IsRequired()
@@ -270,6 +482,10 @@ namespace Aura.Infrastructure.Migrations2
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("InviteToken")
+                        .IsUnique()
+                        .HasFilter("\"InviteToken\" IS NOT NULL");
 
                     b.HasIndex("TenantId", "Email")
                         .IsUnique();
@@ -356,6 +572,39 @@ namespace Aura.Infrastructure.Migrations2
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("Aura.Core.Entities.EssenceVersion", b =>
+                {
+                    b.HasOne("Aura.Core.Entities.Essence", "Essence")
+                        .WithMany("Versions")
+                        .HasForeignKey("EssenceId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Essence");
+                });
+
+            modelBuilder.Entity("Aura.Core.Entities.ExperimentAssignment", b =>
+                {
+                    b.HasOne("Aura.Core.Entities.Experiment", "Experiment")
+                        .WithMany("Assignments")
+                        .HasForeignKey("ExperimentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Experiment");
+                });
+
+            modelBuilder.Entity("Aura.Core.Entities.ExperimentEvent", b =>
+                {
+                    b.HasOne("Aura.Core.Entities.Experiment", "Experiment")
+                        .WithMany("Events")
+                        .HasForeignKey("ExperimentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Experiment");
+                });
+
             modelBuilder.Entity("Aura.Core.Entities.User", b =>
                 {
                     b.HasOne("Aura.Core.Entities.Tenant", "Tenant")
@@ -380,6 +629,15 @@ namespace Aura.Infrastructure.Migrations2
             modelBuilder.Entity("Aura.Core.Entities.Essence", b =>
                 {
                     b.Navigation("Deployments");
+
+                    b.Navigation("Versions");
+                });
+
+            modelBuilder.Entity("Aura.Core.Entities.Experiment", b =>
+                {
+                    b.Navigation("Assignments");
+
+                    b.Navigation("Events");
                 });
 
             modelBuilder.Entity("Aura.Core.Entities.Tenant", b =>

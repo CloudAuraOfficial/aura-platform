@@ -9,11 +9,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Aura.Infrastructure.Migrations2
+namespace Aura.Infrastructure.Migrations
 {
     [DbContext(typeof(AuraDbContext))]
-    [Migration("20260331131045_AddTraceParentToDeploymentRun")]
-    partial class AddTraceParentToDeploymentRun
+    [Migration("20260402191105_AddEstimatedCostToDeploymentRun")]
+    partial class AddEstimatedCostToDeploymentRun
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -206,6 +206,10 @@ namespace Aura.Infrastructure.Migrations2
                     b.Property<Guid>("DeploymentId")
                         .HasColumnType("uuid");
 
+                    b.Property<decimal?>("EstimatedCostUsd")
+                        .HasPrecision(18, 4)
+                        .HasColumnType("numeric(18,4)");
+
                     b.Property<string>("SnapshotJson")
                         .IsRequired()
                         .HasColumnType("jsonb");
@@ -338,13 +342,16 @@ namespace Aura.Infrastructure.Migrations2
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("Variants")
                         .IsRequired()
                         .HasColumnType("jsonb");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Project", "Status");
+                    b.HasIndex("TenantId", "Project", "Status");
 
                     b.ToTable("Experiments");
                 });

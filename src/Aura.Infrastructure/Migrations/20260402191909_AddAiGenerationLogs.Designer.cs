@@ -9,7 +9,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
 #nullable disable
 
-namespace Aura.Infrastructure.Migrations2
+namespace Aura.Infrastructure.Migrations
 {
     [DbContext(typeof(AuraDbContext))]
     [Migration("20260402191909_AddAiGenerationLogs")]

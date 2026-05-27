@@ -2,17 +2,17 @@
 
 #nullable disable
 
-namespace Aura.Infrastructure.Migrations2
+namespace Aura.Infrastructure.Migrations
 {
     /// <inheritdoc />
-    public partial class AddTraceParentToDeploymentRun : Migration
+    public partial class AddLayerOperationType : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.AddColumn<string>(
-                name: "TraceParent",
-                table: "DeploymentRuns",
+                name: "OperationType",
+                table: "DeploymentLayers",
                 type: "text",
                 nullable: true);
         }
@@ -21,8 +21,8 @@ namespace Aura.Infrastructure.Migrations2
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
-                name: "TraceParent",
-                table: "DeploymentRuns");
+                name: "OperationType",
+                table: "DeploymentLayers");
         }
     }
 }
