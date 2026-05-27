@@ -87,6 +87,7 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<DeleteS3BucketHandler>();
     services.AddTransient<RunEcsTaskHandler>();
     services.AddTransient<DeployCloudFormationHandler>();
+    services.AddTransient<CreateIamRoleHandler>();
 
     services.AddHttpClient();
 
@@ -117,6 +118,7 @@ builder.ConfigureServices((context, services) =>
     registry.Register<DeleteS3BucketHandler>("DeleteS3Bucket");
     registry.Register<RunEcsTaskHandler>("RunEcsTask");
     registry.Register<DeployCloudFormationHandler>("DeployCloudFormation");
+    registry.Register<CreateIamRoleHandler>("CreateIamRole");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
