@@ -79,6 +79,7 @@ builder.ConfigureServices((context, services) =>
     // AWS handlers (Epic 1)
     services.AddTransient<CreateVpcHandler>();
     services.AddTransient<DeleteVpcHandler>();
+    services.AddTransient<CreateEc2InstanceHandler>();
 
     services.AddHttpClient();
 
@@ -101,6 +102,7 @@ builder.ConfigureServices((context, services) =>
     registry.Register<DeleteResourceGroupHandler>("DeleteResourceGroup");
     registry.Register<CreateVpcHandler>("CreateVpc");
     registry.Register<DeleteVpcHandler>("DeleteVpc");
+    registry.Register<CreateEc2InstanceHandler>("CreateEc2Instance");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
