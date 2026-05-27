@@ -16,6 +16,12 @@ public class DeploymentLayer : BaseEntity
     public int SortOrder { get; set; }
     public string? Output { get; set; }
     public string? EmissionLoadImage { get; set; }
+
+    // Per-layer cloud-account override (Epic 3). When null, the layer
+    // inherits the Essence-level CloudAccount. Enables single Essences
+    // that span multiple subscriptions or multiple cloud providers.
+    public Guid? CloudAccountId { get; set; }
+
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 }
