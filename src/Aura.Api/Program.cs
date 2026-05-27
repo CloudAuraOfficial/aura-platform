@@ -8,7 +8,6 @@ using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-// PreflightValidationService registered in DI below
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -122,7 +121,6 @@ var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
     ?? throw new InvalidOperationException("ENCRYPTION_KEY is required");
 builder.Services.AddSingleton<ICryptoService>(new AesCryptoService(encryptionKey));
 builder.Services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
-builder.Services.AddScoped<Aura.Api.Services.PreflightValidationService>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.AzureCostEstimator>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.AwsCostEstimator>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.GcpCostEstimator>();

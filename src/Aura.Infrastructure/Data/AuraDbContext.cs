@@ -43,7 +43,6 @@ public class AuraDbContext : DbContext
         modelBuilder.Entity<Essence>().HasQueryFilter(e => e.TenantId == _tenantId);
         modelBuilder.Entity<Deployment>().HasQueryFilter(e => e.TenantId == _tenantId);
         modelBuilder.Entity<DeploymentRun>().HasQueryFilter(e => e.TenantId == _tenantId);
-        modelBuilder.Entity<Experiment>().HasQueryFilter(e => e.TenantId == _tenantId);
         modelBuilder.Entity<UserAiProvider>().HasQueryFilter(e => e.TenantId == _tenantId);
         modelBuilder.Entity<AiGenerationLog>().HasQueryFilter(e => e.TenantId == _tenantId);
 
@@ -109,7 +108,7 @@ public class AuraDbContext : DbContext
         {
             b.Property(e => e.Variants).HasColumnType("jsonb");
             b.Property(e => e.Status).HasConversion<string>();
-            b.HasIndex(e => new { e.TenantId, e.Project, e.Status });
+            b.HasIndex(e => new { e.Project, e.Status });
         });
 
         // ExperimentAssignment
