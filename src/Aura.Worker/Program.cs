@@ -6,6 +6,7 @@ using Aura.Worker.Executors;
 using Aura.Worker.Operations;
 using Aura.Worker.Operations.Azure;
 using Aura.Worker.Operations.Aws;
+using Aura.Worker.Operations.Gcp;
 using Aura.Worker.Operations.Common;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
@@ -86,6 +87,9 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<CreateS3BucketHandler>();
     services.AddTransient<DeleteS3BucketHandler>();
     services.AddTransient<RunEcsTaskHandler>();
+
+    // GCP handlers (Epic 2)
+    services.AddTransient<CreateNetworkHandler>();
     services.AddTransient<DeployCloudFormationHandler>();
     services.AddTransient<CreateIamRoleHandler>();
 
@@ -119,6 +123,7 @@ builder.ConfigureServices((context, services) =>
     registry.Register<RunEcsTaskHandler>("RunEcsTask");
     registry.Register<DeployCloudFormationHandler>("DeployCloudFormation");
     registry.Register<CreateIamRoleHandler>("CreateIamRole");
+    registry.Register<CreateNetworkHandler>("CreateNetwork");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
