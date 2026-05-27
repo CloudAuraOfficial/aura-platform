@@ -1,0 +1,39 @@
+{
+  "baseEssence": {
+    "EssenceName": "GcpCloudRunDeploy",
+    "EssenceID": "b1c2d3e4-3333-4444-5555-666677778888",
+    "cloudProvider": "Gcp",
+    "subscriptionId": "${BYOS_GCP_PROJECT_ID}",
+    "uniqueId": "aura-gcp-cloudrun",
+    "baseLoad": "EmissionLoadCloudRun",
+    "defaultRegion": "us-central1"
+  },
+  "layers": {
+    "ServiceAccount": {
+      "isEnabled": true,
+      "operationType": "CreateServiceAccount",
+      "parameters": {
+        "accountId": "aura-cloudrun-sa",
+        "displayName": "Aura Cloud Run service account",
+        "description": "Identity for the aura-demo Cloud Run service"
+      }
+    },
+    "DeployService": {
+      "isEnabled": true,
+      "operationType": "DeployCloudRunService",
+      "parameters": {
+        "serviceName": "aura-demo-hello",
+        "region": "us-central1",
+        "image": "us-docker.pkg.dev/cloudrun/container/hello",
+        "port": 8080,
+        "cpuLimit": "1",
+        "memoryLimit": "512Mi",
+        "maxInstances": 10,
+        "env": {
+          "MESSAGE": "Hello from Aura on Cloud Run"
+        }
+      },
+      "dependsOn": ["ServiceAccount"]
+    }
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "baseEssence": {
+    "EssenceName": "GcpNetworkAndGce",
+    "EssenceID": "b1c2d3e4-1111-2222-3333-444455556666",
+    "cloudProvider": "Gcp",
+    "subscriptionId": "${BYOS_GCP_PROJECT_ID}",
+    "uniqueId": "aura-gcp-demo",
+    "baseLoad": "EmissionLoadGce",
+    "defaultRegion": "us-central1"
+  },
+  "layers": {
+    "CreateNetwork": {
+      "isEnabled": true,
+      "operationType": "CreateNetwork",
+      "parameters": {
+        "networkName": "aura-demo-net",
+        "subnetCidr": "10.10.0.0/24",
+        "region": "us-central1"
+      }
+    },
+    "AllowSsh": {
+      "isEnabled": true,
+      "operationType": "CreateFirewallRule",
+      "parameters": {
+        "ruleName": "aura-demo-allow-ssh",
+        "networkName": "aura-demo-net",
+        "ports": ["22"],
+        "sourceRanges": ["0.0.0.0/0"]
+      },
+      "dependsOn": ["CreateNetwork"]
+    },
+    "LaunchInstance": {
+      "isEnabled": true,
+      "operationType": "CreateGceInstance",
+      "parameters": {
+        "instanceName": "aura-demo-gce",
+        "networkName": "aura-demo-net",
+        "zone": "us-central1-a",
+        "machineType": "e2-micro",
+        "diskSizeGb": 10
+      },
+      "dependsOn": ["AllowSsh"]
+    },
+    "HealthCheck": {
+      "isEnabled": true,
+      "operationType": "HttpHealthCheck",
+      "parameters": {
+        "url": "http://example.com",
+        "expectedStatus": 200,
+        "timeoutSeconds": 30
+      },
+      "dependsOn": ["LaunchInstance"]
+    },
+    "DeleteInstance": {
+      "isEnabled": true,
+      "operationType": "DeleteGceInstance",
+      "parameters": {
+        "instanceName": "aura-demo-gce",
+        "zone": "us-central1-a"
+      },
+      "dependsOn": ["HealthCheck"]
+    },
+    "DeleteNetwork": {
+      "isEnabled": true,
+      "operationType": "DeleteNetwork",
+      "parameters": {
+        "networkName": "aura-demo-net"
+      },
+      "dependsOn": ["DeleteInstance"]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "baseEssence": {
+    "EssenceName": "GcpGcsBucket",
+    "EssenceID": "b1c2d3e4-2222-3333-4444-555566667777",
+    "cloudProvider": "Gcp",
+    "subscriptionId": "${BYOS_GCP_PROJECT_ID}",
+    "uniqueId": "aura-gcp-bucket",
+    "baseLoad": "EmissionLoadGcs",
+    "defaultRegion": "us-central1"
+  },
+  "layers": {
+    "CreateBucket": {
+      "isEnabled": true,
+      "operationType": "CreateGcsBucket",
+      "parameters": {
+        "bucketName": "aura-demo-${BYOS_GCP_PROJECT_ID}-bucket",
+        "location": "US",
+        "storageClass": "STANDARD",
+        "versioning": true,
+        "uniformBucketLevelAccess": true
+      }
+    },
+    "DeleteBucket": {
+      "isEnabled": true,
+      "operationType": "DeleteGcsBucket",
+      "parameters": {
+        "bucketName": "aura-demo-${BYOS_GCP_PROJECT_ID}-bucket",
+        "force": true
+      },
+      "dependsOn": ["CreateBucket"]
+    }
+  }
+}
