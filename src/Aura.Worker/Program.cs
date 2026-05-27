@@ -92,6 +92,9 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<CreateNetworkHandler>();
     services.AddTransient<DeleteNetworkHandler>();
     services.AddTransient<CreateGceInstanceHandler>();
+    services.AddTransient<StartGceInstanceHandler>();
+    services.AddTransient<StopGceInstanceHandler>();
+    services.AddTransient<DeleteGceInstanceHandler>();
     services.AddTransient<DeployCloudFormationHandler>();
     services.AddTransient<CreateIamRoleHandler>();
 
@@ -128,6 +131,9 @@ builder.ConfigureServices((context, services) =>
     registry.Register<CreateNetworkHandler>("CreateNetwork");
     registry.Register<DeleteNetworkHandler>("DeleteNetwork");
     registry.Register<CreateGceInstanceHandler>("CreateGceInstance");
+    registry.Register<StartGceInstanceHandler>("StartGceInstance");
+    registry.Register<StopGceInstanceHandler>("StopGceInstance");
+    registry.Register<DeleteGceInstanceHandler>("DeleteGceInstance");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
