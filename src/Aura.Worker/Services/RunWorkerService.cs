@@ -176,8 +176,19 @@ public class RunWorkerService : BackgroundService
         await PublishLogSafe(logStream, runId,
             $"Run started with {run.Layers.Count} layer(s)", ct);
 
-        // Decrypt BYOS credentials if cloud account is linked
-        var envVars = await BuildEnvVarsAsync(db, crypto, run, ct);
+        // Snapshot-level envVars (provider, region, etc.) — no creds.
+        // Layer-specific creds are resolved per-layer below so a multi-cloud
+        // Essence can route each layer to its own CloudAccount.
+        var snapshotEnvVars = BuildSnapshotEnvVars(run);
+
+        // Run-scoped cache of decrypted credentials, keyed by CloudAccount.Id.
+        // Each unique account is decrypted once + audited once per run; subsequent
+        // layers using the same account hit the cache. Handlers still only ever
+        // see *their* layer's account creds — the cache is internal to the worker
+        // process (per-layer envVars scoping below).
+        var credCache = new Dictionary<Guid, Dictionary<string, string>>();
+        var auditedAccounts = new HashSet<Guid>();
+        var auditService = scope.ServiceProvider.GetRequiredService<IAuditService>();
 
         // Execute layers in topological order
         var failed = false;
@@ -219,7 +230,14 @@ public class RunWorkerService : BackgroundService
                 var workDir = Path.Combine(Path.GetTempPath(), "aura-runs", runId.ToString());
                 Directory.CreateDirectory(workDir);
 
-                var result = await executor.ExecuteAsync(layer, workDir, envVars, ct);
+                // Per-layer envVars: snapshot fields + creds for *this* layer's
+                // account only. Handlers never see other accounts' creds even
+                // when the run cache holds them.
+                var layerEnvVars = await BuildLayerEnvVarsAsync(
+                    db, crypto, auditService, run, layer,
+                    snapshotEnvVars, credCache, auditedAccounts, ct);
+
+                var result = await executor.ExecuteAsync(layer, workDir, layerEnvVars, ct);
 
                 layer.Output = TruncateOutput(result.Output);
                 layer.Status = result.Success ? LayerStatus.Succeeded : LayerStatus.Failed;
@@ -391,11 +409,13 @@ public class RunWorkerService : BackgroundService
         await db.SaveChangesAsync(ct);
     }
 
-    private static async Task<Dictionary<string, string>> BuildEnvVarsAsync(
-        AuraDbContext db, ICryptoService crypto, DeploymentRun run, CancellationToken ct)
+    /// <summary>
+    /// Snapshot-level envVars (provider, region, uniqueId, subscriptionId).
+    /// No credentials. Called once per run.
+    /// </summary>
+    private static Dictionary<string, string> BuildSnapshotEnvVars(DeploymentRun run)
     {
         var envVars = new Dictionary<string, string>();
-
         try
         {
             using var doc = JsonDocument.Parse(run.SnapshotJson);
@@ -403,13 +423,10 @@ public class RunWorkerService : BackgroundService
             {
                 if (baseEssence.TryGetProperty("cloudProvider", out var provider))
                     envVars["AURA_CLOUD_PROVIDER"] = provider.GetString() ?? "";
-
                 if (baseEssence.TryGetProperty("defaultRegion", out var region))
                     envVars["AURA_DEFAULT_REGION"] = region.GetString() ?? "";
-
                 if (baseEssence.TryGetProperty("uniqueId", out var uniqueId))
                     envVars["AURA_UNIQUE_ID"] = uniqueId.GetString() ?? "";
-
                 if (baseEssence.TryGetProperty("subscriptionId", out var subId))
                     envVars["AURA_SUBSCRIPTION_ID"] = subId.GetString() ?? "";
             }
@@ -418,28 +435,83 @@ public class RunWorkerService : BackgroundService
         {
             // Non-critical: snapshot may not have baseEssence
         }
+        return envVars;
+    }
 
-        // Resolve BYOS credentials from the linked CloudAccount
+    /// <summary>
+    /// Per-layer envVars: snapshot fields + this layer's CloudAccount creds.
+    /// Resolution order: layer.CloudAccountId → essence.CloudAccountId (permissive
+    /// fallback). Decryption is cached by accountId for the run; first decrypt
+    /// per accountId per run emits an audit event so forensics can trace which
+    /// account was unlocked when.
+    ///
+    /// Per-layer scoping: the returned dict carries only this layer's account's
+    /// creds. Cache (held by the worker process) holds N decrypted sets on
+    /// multi-cloud runs, but no handler ever sees more than its own.
+    /// </summary>
+    private async Task<Dictionary<string, string>> BuildLayerEnvVarsAsync(
+        AuraDbContext db, ICryptoService crypto, IAuditService auditService,
+        DeploymentRun run, DeploymentLayer layer,
+        Dictionary<string, string> snapshotEnvVars,
+        Dictionary<Guid, Dictionary<string, string>> credCache,
+        HashSet<Guid> auditedAccounts,
+        CancellationToken ct)
+    {
+        // Start from a copy of snapshot envVars; never mutate the shared dict.
+        var envVars = new Dictionary<string, string>(snapshotEnvVars);
+
+        // Permissive fallback: layer override wins; otherwise inherit from Essence.
+        var accountId = layer.CloudAccountId
+            ?? run.Deployment?.Essence?.CloudAccountId
+            ?? Guid.Empty;
+
+        if (accountId == Guid.Empty)
+        {
+            return envVars;
+        }
+
+        // Cache hit: reuse decrypted creds without re-decrypting or re-auditing.
+        if (credCache.TryGetValue(accountId, out var cached))
+        {
+            ByosResolver.PopulateEnvVars(envVars, cached);
+            return envVars;
+        }
+
+        // Cache miss: load + decrypt + cache + audit.
         try
         {
-            var cloudAccount = run.Deployment?.Essence?.CloudAccount;
-            if (cloudAccount is null && run.Deployment?.Essence?.CloudAccountId is Guid accountId
-                && accountId != Guid.Empty)
-            {
-                cloudAccount = await db.CloudAccounts.FindAsync(new object[] { accountId }, ct);
-            }
+            var cloudAccount = run.Deployment?.Essence?.CloudAccount?.Id == accountId
+                ? run.Deployment.Essence.CloudAccount
+                : await db.CloudAccounts.IgnoreQueryFilters()
+                    .FirstOrDefaultAsync(c => c.Id == accountId, ct);
 
             if (cloudAccount is not null && !string.IsNullOrEmpty(cloudAccount.EncryptedCredentials))
             {
                 var decrypted = crypto.Decrypt(cloudAccount.EncryptedCredentials);
-                var credentials = JsonSerializer.Deserialize<Dictionary<string, string>>(decrypted)
+                var creds = JsonSerializer.Deserialize<Dictionary<string, string>>(decrypted)
                     ?? new Dictionary<string, string>();
-                ByosResolver.PopulateEnvVars(envVars, credentials);
+                credCache[accountId] = creds;
+
+                if (auditedAccounts.Add(accountId))
+                {
+                    var systemUserId = Guid.Empty; // worker has no acting user
+                    await auditService.LogAsync(
+                        cloudAccount.TenantId, systemUserId,
+                        action: "decrypt_credentials",
+                        entityType: nameof(Aura.Core.Entities.CloudAccount),
+                        entityId: accountId,
+                        detail: $"run={run.Id}; provider={cloudAccount.Provider}",
+                        ct);
+                }
+
+                ByosResolver.PopulateEnvVars(envVars, creds);
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // Non-critical: cloud account may not exist or credentials may be invalid
+            _logger.LogWarning(ex,
+                "Failed to resolve CloudAccount {AccountId} for layer {Layer} in run {RunId}",
+                accountId, layer.LayerName, run.Id);
         }
 
         return envVars;

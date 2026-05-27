@@ -187,6 +187,7 @@ builder.ConfigureServices((context, services) =>
 
     // Orchestration (used by scheduler to create runs)
     services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
+    services.AddScoped<IAuditService, AuditService>();
     services.AddScoped<IExperimentService, ExperimentService>();
 
     // Tenant context (worker uses unscoped / IgnoreQueryFilters)
