@@ -182,6 +182,7 @@ builder.ConfigureServices((context, services) =>
     // Cloud cost estimators — factory selects per run's CloudProvider
     services.AddSingleton<ICloudCostEstimator, AzureCostEstimator>();
     services.AddSingleton<ICloudCostEstimator, AwsCostEstimator>();
+    services.AddSingleton<ICloudCostEstimator, GcpCostEstimator>();
     services.AddSingleton<ICloudCostEstimatorFactory, CloudCostEstimatorFactory>();
 
     // Orchestration (used by scheduler to create runs)

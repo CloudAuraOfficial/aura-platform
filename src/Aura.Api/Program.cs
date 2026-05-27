@@ -125,6 +125,7 @@ builder.Services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrat
 builder.Services.AddScoped<Aura.Api.Services.PreflightValidationService>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.AzureCostEstimator>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.AwsCostEstimator>();
+builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.GcpCostEstimator>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimatorFactory, Aura.Infrastructure.Services.CloudCostEstimatorFactory>();
 builder.Services.AddScoped<IExperimentService, ExperimentService>();
 builder.Services.AddScoped<UserAiKeyService>();
