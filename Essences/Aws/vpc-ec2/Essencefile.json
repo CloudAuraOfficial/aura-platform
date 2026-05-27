@@ -1,0 +1,60 @@
+{
+  "baseEssence": {
+    "EssenceName": "AwsVpcAndEc2",
+    "EssenceID": "a1b2c3d4-1111-2222-3333-444455556666",
+    "cloudProvider": "Aws",
+    "subscriptionId": "000000000000",
+    "uniqueId": "aura-aws-demo",
+    "baseLoad": "EmissionLoadEc2",
+    "defaultRegion": "us-east-1"
+  },
+  "layers": {
+    "CreateVpc": {
+      "isEnabled": true,
+      "operationType": "CreateVpc",
+      "parameters": {
+        "vpcName": "aura-demo-vpc",
+        "cidrBlock": "10.0.0.0/16",
+        "subnetCidr": "10.0.0.0/24"
+      }
+    },
+    "LaunchInstance": {
+      "isEnabled": true,
+      "operationType": "CreateEc2Instance",
+      "parameters": {
+        "instanceName": "aura-demo-ec2",
+        "vpcName": "aura-demo-vpc",
+        "ami": "ami-0c7217cdde317cfec",
+        "instanceType": "t3.micro",
+        "openPorts": [22, 80]
+      },
+      "dependsOn": ["CreateVpc"]
+    },
+    "HealthCheck": {
+      "isEnabled": true,
+      "operationType": "HttpHealthCheck",
+      "parameters": {
+        "url": "http://example.com",
+        "expectedStatus": 200,
+        "timeoutSeconds": 30
+      },
+      "dependsOn": ["LaunchInstance"]
+    },
+    "TerminateInstance": {
+      "isEnabled": true,
+      "operationType": "TerminateEc2Instance",
+      "parameters": {
+        "instanceName": "aura-demo-ec2"
+      },
+      "dependsOn": ["HealthCheck"]
+    },
+    "DeleteVpc": {
+      "isEnabled": true,
+      "operationType": "DeleteVpc",
+      "parameters": {
+        "vpcName": "aura-demo-vpc"
+      },
+      "dependsOn": ["TerminateInstance"]
+    }
+  }
+}

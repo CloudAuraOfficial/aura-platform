@@ -1,0 +1,43 @@
+{
+  "baseEssence": {
+    "EssenceName": "AwsFargateTask",
+    "EssenceID": "a1b2c3d4-3333-4444-5555-666677778888",
+    "cloudProvider": "Aws",
+    "subscriptionId": "000000000000",
+    "uniqueId": "aura-aws-fargate",
+    "baseLoad": "EmissionLoadFargate",
+    "defaultRegion": "us-east-1"
+  },
+  "layers": {
+    "TaskExecutionRole": {
+      "isEnabled": true,
+      "operationType": "CreateIamRole",
+      "parameters": {
+        "roleName": "aura-fargate-exec-role",
+        "assumeRolePolicy": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": { "Service": "ecs-tasks.amazonaws.com" },
+            "Action": "sts:AssumeRole"
+          }]
+        },
+        "managedPolicyArns": [
+          "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+        ]
+      }
+    },
+    "RunTask": {
+      "isEnabled": true,
+      "operationType": "RunEcsTask",
+      "parameters": {
+        "cluster": "${BYOS_ECS_CLUSTER_NAME}",
+        "taskDefinition": "aura-demo-task:1",
+        "subnets": ["${BYOS_PUBLIC_SUBNET_ID}"],
+        "timeoutSeconds": 600,
+        "assignPublicIp": true
+      },
+      "dependsOn": ["TaskExecutionRole"]
+    }
+  }
+}
