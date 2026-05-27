@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Aura.Core.Enums;
+using Aura.Core.Interfaces;
 
 namespace Aura.Infrastructure.Services;
 
@@ -8,8 +10,10 @@ namespace Aura.Infrastructure.Services;
 /// Uses Azure pay-as-you-go rates (USD). Rates are approximate and
 /// should be treated as projections, not invoices.
 /// </summary>
-public static class AzureCostEstimator
+public class AzureCostEstimator : ICloudCostEstimator
 {
+    public CloudProvider Provider => CloudProvider.Azure;
+
     // VM pricing per hour (pay-as-you-go, Linux, USD)
     private static readonly Dictionary<string, decimal> VmPricing = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -35,8 +39,7 @@ public static class AzureCostEstimator
     private const decimal PublicIpPerHour = 0.005m;
     private const decimal ManagedDiskPerGbPerMonth = 0.05m;
 
-    public static RunCostEstimate EstimateRunCost(
-        IEnumerable<LayerCostInput> layers)
+    public RunCostEstimate EstimateRunCost(IEnumerable<LayerCostInput> layers)
     {
         var layerCosts = new List<LayerCostEstimate>();
         var totalCost = 0m;
@@ -191,7 +194,3 @@ public static class AzureCostEstimator
 
     private record ContainerSpec(string Name, double Cpu, double MemoryGb);
 }
-
-public record RunCostEstimate(decimal TotalEstimatedCost, List<LayerCostEstimate> Layers);
-public record LayerCostEstimate(string LayerName, string OperationType, decimal EstimatedCost, List<string> Breakdown);
-public record LayerCostInput(string LayerName, string? OperationType, decimal DurationSeconds, JsonElement? Parameters);

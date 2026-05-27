@@ -123,6 +123,7 @@ var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
 builder.Services.AddSingleton<ICryptoService>(new AesCryptoService(encryptionKey));
 builder.Services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
 builder.Services.AddScoped<Aura.Api.Services.PreflightValidationService>();
+builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.AzureCostEstimator>();
 builder.Services.AddScoped<IExperimentService, ExperimentService>();
 builder.Services.AddScoped<UserAiKeyService>();
 

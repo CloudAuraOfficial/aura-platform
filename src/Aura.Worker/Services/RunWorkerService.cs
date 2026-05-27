@@ -143,6 +143,7 @@ public class RunWorkerService : BackgroundService
         var crypto = scope.ServiceProvider.GetRequiredService<ICryptoService>();
         var webhookService = scope.ServiceProvider.GetRequiredService<WebhookService>();
         var logStream = scope.ServiceProvider.GetRequiredService<ILogStreamService>();
+        var costEstimator = scope.ServiceProvider.GetRequiredService<ICloudCostEstimator>();
 
         var run = await db.DeploymentRuns
             .IgnoreQueryFilters()
@@ -290,7 +291,7 @@ public class RunWorkerService : BackgroundService
             activity?.SetStatus(ActivityStatusCode.Error, "One or more layers failed");
 
         // Materialize cost estimate on the run for fast dashboard aggregation
-        run.EstimatedCostUsd = ComputeRunCost(run);
+        run.EstimatedCostUsd = ComputeRunCost(run, costEstimator);
 
         await db.SaveChangesAsync(ct);
 
@@ -356,6 +357,7 @@ public class RunWorkerService : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AuraDbContext>();
+        var costEstimator = scope.ServiceProvider.GetRequiredService<ICloudCostEstimator>();
 
         var threshold = DateTime.UtcNow.AddSeconds(-_staleThresholdSeconds);
         var staleRuns = await db.DeploymentRuns
@@ -383,7 +385,7 @@ public class RunWorkerService : BackgroundService
                 layer.CompletedAt = DateTime.UtcNow;
             }
 
-            run.EstimatedCostUsd = ComputeRunCost(run);
+            run.EstimatedCostUsd = ComputeRunCost(run, costEstimator);
         }
 
         await db.SaveChangesAsync(ct);
@@ -453,7 +455,7 @@ public class RunWorkerService : BackgroundService
         _ => throw new InvalidOperationException($"Unknown executor type: {type}")
     };
 
-    private static decimal ComputeRunCost(DeploymentRun run)
+    private static decimal ComputeRunCost(DeploymentRun run, ICloudCostEstimator costEstimator)
     {
         var layerInputs = run.Layers.Select(l =>
         {
@@ -472,7 +474,7 @@ public class RunWorkerService : BackgroundService
             return new LayerCostInput(l.LayerName, l.OperationType, durationSeconds, parameters);
         }).ToList();
 
-        return AzureCostEstimator.EstimateRunCost(layerInputs).TotalEstimatedCost;
+        return costEstimator.EstimateRunCost(layerInputs).TotalEstimatedCost;
     }
 
     private static string ExtractOperationType(string? parametersJson)

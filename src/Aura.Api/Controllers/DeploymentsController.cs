@@ -21,15 +21,17 @@ public class DeploymentsController : ControllerBase
     private readonly ITenantContext _tenant;
     private readonly IDeploymentOrchestrationService _orchestration;
     private readonly PreflightValidationService _preflight;
+    private readonly ICloudCostEstimator _costEstimator;
 
     public DeploymentsController(
         AuraDbContext db, ITenantContext tenant, IDeploymentOrchestrationService orchestration,
-        PreflightValidationService preflight)
+        PreflightValidationService preflight, ICloudCostEstimator costEstimator)
     {
         _db = db;
         _tenant = tenant;
         _orchestration = orchestration;
         _preflight = preflight;
+        _costEstimator = costEstimator;
     }
 
     [HttpGet]
@@ -255,7 +257,7 @@ public class DeploymentsController : ControllerBase
             return new LayerCostInput(l.LayerName, l.OperationType, durationSeconds, parameters);
         }).ToList();
 
-        var estimate = AzureCostEstimator.EstimateRunCost(layerInputs);
+        var estimate = _costEstimator.EstimateRunCost(layerInputs);
         return Ok(estimate);
     }
 
