@@ -97,6 +97,7 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<DeleteGceInstanceHandler>();
     services.AddTransient<CreateGcsBucketHandler>();
     services.AddTransient<DeleteGcsBucketHandler>();
+    services.AddTransient<CreateFirewallRuleHandler>();
     services.AddTransient<DeployCloudFormationHandler>();
     services.AddTransient<CreateIamRoleHandler>();
 
@@ -138,6 +139,7 @@ builder.ConfigureServices((context, services) =>
     registry.Register<DeleteGceInstanceHandler>("DeleteGceInstance");
     registry.Register<CreateGcsBucketHandler>("CreateGcsBucket");
     registry.Register<DeleteGcsBucketHandler>("DeleteGcsBucket");
+    registry.Register<CreateFirewallRuleHandler>("CreateFirewallRule");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
