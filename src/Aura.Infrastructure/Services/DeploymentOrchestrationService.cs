@@ -134,7 +134,18 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 }
             }
 
-            definitions[name] = new LayerDefinition(name, executorType, parameters, scriptPath, dependsOn, operationType);
+            // Epic 3: optional per-layer cloud-account override. Silently
+            // ignore non-string or unparseable values; the layer will fall
+            // back to the Essence-level CloudAccount at run time.
+            Guid? cloudAccountId = null;
+            if (val.TryGetProperty("cloudAccountId", out var caProp)
+                && caProp.ValueKind == JsonValueKind.String
+                && Guid.TryParse(caProp.GetString(), out var parsed))
+            {
+                cloudAccountId = parsed;
+            }
+
+            definitions[name] = new LayerDefinition(name, executorType, parameters, scriptPath, dependsOn, operationType, cloudAccountId);
         }
 
         // Remove dependencies on disabled/missing layers
@@ -160,7 +171,8 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 ScriptPath = def.ScriptPath,
                 OperationType = def.OperationType,
                 DependsOn = JsonSerializer.Serialize(def.DependsOn),
-                SortOrder = i
+                SortOrder = i,
+                CloudAccountId = def.CloudAccountId
             });
         }
 
@@ -219,6 +231,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         string Parameters,
         string? ScriptPath,
         List<string> DependsOn,
-        string? OperationType = null
+        string? OperationType = null,
+        Guid? CloudAccountId = null
     );
 }
