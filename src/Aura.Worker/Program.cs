@@ -90,6 +90,7 @@ builder.ConfigureServices((context, services) =>
 
     // GCP handlers (Epic 2)
     services.AddTransient<CreateNetworkHandler>();
+    services.AddTransient<DeleteNetworkHandler>();
     services.AddTransient<DeployCloudFormationHandler>();
     services.AddTransient<CreateIamRoleHandler>();
 
@@ -124,6 +125,7 @@ builder.ConfigureServices((context, services) =>
     registry.Register<DeployCloudFormationHandler>("DeployCloudFormation");
     registry.Register<CreateIamRoleHandler>("CreateIamRole");
     registry.Register<CreateNetworkHandler>("CreateNetwork");
+    registry.Register<DeleteNetworkHandler>("DeleteNetwork");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
