@@ -80,6 +80,9 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<CreateVpcHandler>();
     services.AddTransient<DeleteVpcHandler>();
     services.AddTransient<CreateEc2InstanceHandler>();
+    services.AddTransient<StartEc2InstanceHandler>();
+    services.AddTransient<StopEc2InstanceHandler>();
+    services.AddTransient<TerminateEc2InstanceHandler>();
 
     services.AddHttpClient();
 
@@ -103,6 +106,9 @@ builder.ConfigureServices((context, services) =>
     registry.Register<CreateVpcHandler>("CreateVpc");
     registry.Register<DeleteVpcHandler>("DeleteVpc");
     registry.Register<CreateEc2InstanceHandler>("CreateEc2Instance");
+    registry.Register<StartEc2InstanceHandler>("StartEc2Instance");
+    registry.Register<StopEc2InstanceHandler>("StopEc2Instance");
+    registry.Register<TerminateEc2InstanceHandler>("TerminateEc2Instance");
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
