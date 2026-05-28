@@ -74,6 +74,8 @@ builder.ConfigureServices((context, services) =>
     services.AddTransient<StartVMHandler>();
     services.AddTransient<StopVMHandler>();
     services.AddTransient<DeleteVMHandler>();
+    services.AddTransient<CreateVirtualNetworkHandler>();
+    services.AddTransient<DeleteVirtualNetworkHandler>();
     services.AddTransient<DeployArmTemplateHandler>();
     services.AddTransient<DeleteResourceGroupHandler>();
 
@@ -120,6 +122,8 @@ builder.ConfigureServices((context, services) =>
     registry.Register<StartVMHandler>("StartVM");
     registry.Register<StopVMHandler>("StopVM");
     registry.Register<DeleteVMHandler>("DeleteVM");
+    registry.Register<CreateVirtualNetworkHandler>("CreateVirtualNetwork");
+    registry.Register<DeleteVirtualNetworkHandler>("DeleteVirtualNetwork");
     registry.Register<DeployArmTemplateHandler>("DeployArmTemplate");
     registry.Register<DeleteResourceGroupHandler>("DeleteResourceGroup");
     registry.Register<CreateVpcHandler>("CreateVpc");
