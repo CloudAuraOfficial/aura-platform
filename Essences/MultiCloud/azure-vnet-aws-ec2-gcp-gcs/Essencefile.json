@@ -1,0 +1,127 @@
+{
+  "baseEssence": {
+    "EssenceName": "MultiCloudAzureVNetAwsEc2GcpGcs",
+    "EssenceID": "d4e5f6a7-3333-4444-5555-666677778888",
+    "_comment": "Real multi-cloud proof of life: Azure VNet+subnets, AWS VPC+EC2, GCP GCS bucket. Each layer pins its own cloudAccountId. Teardown layers run after the health check.",
+    "uniqueId": "aura-multicloud-vnet-ec2-gcs"
+  },
+  "layers": {
+    "AzureResourceGroup": {
+      "isEnabled": true,
+      "operationType": "CreateResourceGroup",
+      "cloudAccountId": "b654ac43-12fe-40c2-b561-9d6546abbe07",
+      "parameters": {
+        "resourceGroupName": "aura-multicloud-rg",
+        "location": "eastus"
+      }
+    },
+    "AzureVirtualNetwork": {
+      "isEnabled": true,
+      "operationType": "CreateVirtualNetwork",
+      "cloudAccountId": "b654ac43-12fe-40c2-b561-9d6546abbe07",
+      "parameters": {
+        "vnetName": "aura-multicloud-vnet",
+        "resourceGroupName": "aura-multicloud-rg",
+        "location": "eastus",
+        "addressPrefixes": ["10.10.0.0/16"],
+        "subnets": [
+          { "name": "web", "addressPrefix": "10.10.1.0/24" },
+          { "name": "app", "addressPrefix": "10.10.2.0/24" }
+        ]
+      },
+      "dependsOn": ["AzureResourceGroup"]
+    },
+    "AwsVpc": {
+      "isEnabled": true,
+      "operationType": "CreateVpc",
+      "cloudAccountId": "c2359917-6d60-4460-9b1b-c8001538f08f",
+      "parameters": {
+        "vpcName": "aura-multicloud-vpc",
+        "cidrBlock": "10.20.0.0/16",
+        "subnetCidr": "10.20.0.0/24"
+      }
+    },
+    "AwsEc2": {
+      "isEnabled": true,
+      "operationType": "CreateEc2Instance",
+      "cloudAccountId": "c2359917-6d60-4460-9b1b-c8001538f08f",
+      "parameters": {
+        "instanceName": "aura-multicloud-ec2",
+        "vpcName": "aura-multicloud-vpc",
+        "ami": "ami-0c7217cdde317cfec",
+        "instanceType": "t3.micro",
+        "openPorts": [22]
+      },
+      "dependsOn": ["AwsVpc"]
+    },
+    "GcpGcsBucket": {
+      "isEnabled": true,
+      "operationType": "CreateGcsBucket",
+      "cloudAccountId": "7abdff61-7db1-448f-9fdd-60a26b47ca45",
+      "parameters": {
+        "bucketName": "aura-mc-${BYOS_project_id}-demo",
+        "location": "US",
+        "storageClass": "STANDARD",
+        "versioning": false,
+        "uniformBucketLevelAccess": true
+      }
+    },
+    "CrossCloudHealthCheck": {
+      "isEnabled": true,
+      "operationType": "HttpHealthCheck",
+      "parameters": {
+        "endpoint": "https://example.com",
+        "expectedStatus": 200,
+        "maxRetries": 1
+      },
+      "dependsOn": ["AzureVirtualNetwork", "AwsEc2", "GcpGcsBucket"]
+    },
+    "GcpGcsBucketTeardown": {
+      "isEnabled": true,
+      "operationType": "DeleteGcsBucket",
+      "cloudAccountId": "7abdff61-7db1-448f-9fdd-60a26b47ca45",
+      "parameters": {
+        "bucketName": "aura-mc-${BYOS_project_id}-demo",
+        "force": true
+      },
+      "dependsOn": ["CrossCloudHealthCheck"]
+    },
+    "AwsEc2Teardown": {
+      "isEnabled": true,
+      "operationType": "TerminateEc2Instance",
+      "cloudAccountId": "c2359917-6d60-4460-9b1b-c8001538f08f",
+      "parameters": {
+        "instanceName": "aura-multicloud-ec2"
+      },
+      "dependsOn": ["CrossCloudHealthCheck"]
+    },
+    "AwsVpcTeardown": {
+      "isEnabled": true,
+      "operationType": "DeleteVpc",
+      "cloudAccountId": "c2359917-6d60-4460-9b1b-c8001538f08f",
+      "parameters": {
+        "vpcName": "aura-multicloud-vpc"
+      },
+      "dependsOn": ["AwsEc2Teardown"]
+    },
+    "AzureVirtualNetworkTeardown": {
+      "isEnabled": true,
+      "operationType": "DeleteVirtualNetwork",
+      "cloudAccountId": "b654ac43-12fe-40c2-b561-9d6546abbe07",
+      "parameters": {
+        "vnetName": "aura-multicloud-vnet",
+        "resourceGroupName": "aura-multicloud-rg"
+      },
+      "dependsOn": ["CrossCloudHealthCheck"]
+    },
+    "AzureResourceGroupTeardown": {
+      "isEnabled": true,
+      "operationType": "DeleteResourceGroup",
+      "cloudAccountId": "b654ac43-12fe-40c2-b561-9d6546abbe07",
+      "parameters": {
+        "resourceGroupName": "aura-multicloud-rg"
+      },
+      "dependsOn": ["AzureVirtualNetworkTeardown"]
+    }
+  }
+}
