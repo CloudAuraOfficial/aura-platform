@@ -8,6 +8,7 @@
     <InternalsVisibleTo Include="Aura.Tests" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="AWSSDK.SecurityToken" Version="4.0.5.4" />
     <PackageReference Include="Docker.DotNet" Version="3.125.15" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.11" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />

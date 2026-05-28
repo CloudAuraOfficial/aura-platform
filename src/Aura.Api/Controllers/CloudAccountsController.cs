@@ -17,12 +17,18 @@ public class CloudAccountsController : ControllerBase
     private readonly AuraDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly ICryptoService _crypto;
+    private readonly ICloudCredentialTester _tester;
 
-    public CloudAccountsController(AuraDbContext db, ITenantContext tenant, ICryptoService crypto)
+    public CloudAccountsController(
+        AuraDbContext db,
+        ITenantContext tenant,
+        ICryptoService crypto,
+        ICloudCredentialTester tester)
     {
         _db = db;
         _tenant = tenant;
         _crypto = crypto;
+        _tester = tester;
     }
 
     [HttpGet]
@@ -79,6 +85,18 @@ public class CloudAccountsController : ControllerBase
 
         await _db.SaveChangesAsync();
         return Ok(ToDto(account));
+    }
+
+    [HttpPost("{id:guid}/test")]
+    public async Task<IActionResult> Test(Guid id, CancellationToken ct)
+    {
+        var account = await _db.CloudAccounts.FindAsync(new object[] { id }, ct);
+        if (account is null)
+            return NotFound(new ErrorResponse("not_found", "Cloud account not found.", 404));
+
+        var credsJson = _crypto.Decrypt(account.EncryptedCredentials);
+        var result = await _tester.TestAsync(account.Provider, credsJson, ct);
+        return Ok(result);
     }
 
     [HttpDelete("{id:guid}")]

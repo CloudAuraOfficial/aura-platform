@@ -127,6 +127,23 @@ async function deleteAccount(id, label) {
     loadAccounts();
 }
 
+async function testAccount(id, btn) {
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    try {
+        const res = await api(`/api/v1/cloud-accounts/${id}/test`, { method: 'POST' });
+        if (res?.success) {
+            toast(`${res.provider} OK (${res.durationMs}ms): ${res.identity}`, 'success');
+        } else {
+            toast(`${res?.provider || 'Test'} failed: ${res?.errorMessage || res?.message || 'unknown error'}`, 'error');
+        }
+    } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+    }
+}
+
 function providerBadge(p) {
     const colors = { Azure: 'info', Aws: 'warning', Gcp: 'success' };
     return `<span class="badge badge-${colors[p] || 'muted'}">${p}</span>`;
@@ -149,6 +166,7 @@ async function loadAccounts() {
         <td>${providerBadge(a.provider)}</td>
         <td>${new Date(a.createdAt).toLocaleDateString()}</td>
         <td class="actions">
+            <button class="btn btn-secondary btn-sm" onclick="testAccount('${a.id}', this)">Test</button>
             <button class="btn btn-secondary btn-sm" onclick='openEdit(${JSON.stringify(a)})'>Edit</button>
             <button class="btn btn-danger btn-sm" onclick="deleteAccount('${a.id}','${a.label.replace(/'/g,"\\'")}')">Delete</button>
         </td>

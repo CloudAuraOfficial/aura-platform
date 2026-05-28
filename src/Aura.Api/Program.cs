@@ -110,6 +110,8 @@ builder.Services.AddScoped<IAuditService, AuditService>();
 var encryptionKey = Environment.GetEnvironmentVariable("ENCRYPTION_KEY")
     ?? throw new InvalidOperationException("ENCRYPTION_KEY is required");
 builder.Services.AddSingleton<ICryptoService>(new AesCryptoService(encryptionKey));
+builder.Services.AddHttpClient("cloud-cred-test");
+builder.Services.AddScoped<ICloudCredentialTester, CloudCredentialTester>();
 builder.Services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.AzureCostEstimator>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.AwsCostEstimator>();

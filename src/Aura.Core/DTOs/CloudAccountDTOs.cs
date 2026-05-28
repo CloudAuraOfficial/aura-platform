@@ -20,3 +20,11 @@ public sealed record CloudAccountResponse(
     string Label,
     DateTime CreatedAt
 );
+
+public sealed record CredentialTestResponse(
+    bool Success,
+    string Provider,
+    string? Identity,
+    string? ErrorMessage,
+    int DurationMs
+);
