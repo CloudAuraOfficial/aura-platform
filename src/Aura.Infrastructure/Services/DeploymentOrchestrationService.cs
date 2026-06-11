@@ -145,7 +145,21 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 cloudAccountId = parsed;
             }
 
-            definitions[name] = new LayerDefinition(name, executorType, parameters, scriptPath, dependsOn, operationType, cloudAccountId);
+            // #13: optional finally-semantics. Strict parse — runPolicy is a
+            // safety property, so a typo must fail at run creation rather than
+            // silently fall back to fail-stop and reintroduce orphaning.
+            var runPolicy = RunPolicy.OnSuccess;
+            if (val.TryGetProperty("runPolicy", out var rpProp))
+            {
+                if (rpProp.ValueKind != JsonValueKind.String
+                    || !Enum.TryParse<RunPolicy>(rpProp.GetString(), ignoreCase: true, out runPolicy))
+                {
+                    throw new InvalidOperationException(
+                        $"Layer '{name}': unknown runPolicy '{rpProp}'. Valid values: onSuccess, always.");
+                }
+            }
+
+            definitions[name] = new LayerDefinition(name, executorType, parameters, scriptPath, dependsOn, operationType, cloudAccountId, runPolicy);
         }
 
         // Remove dependencies on disabled/missing layers
@@ -172,7 +186,8 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 OperationType = def.OperationType,
                 DependsOn = JsonSerializer.Serialize(def.DependsOn),
                 SortOrder = i,
-                CloudAccountId = def.CloudAccountId
+                CloudAccountId = def.CloudAccountId,
+                RunPolicy = def.RunPolicy
             });
         }
 
@@ -232,6 +247,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         string? ScriptPath,
         List<string> DependsOn,
         string? OperationType = null,
-        Guid? CloudAccountId = null
+        Guid? CloudAccountId = null,
+        RunPolicy RunPolicy = RunPolicy.OnSuccess
     );
 }

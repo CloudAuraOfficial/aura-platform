@@ -42,14 +42,15 @@
       "isEnabled": true,
       "operationType": "HttpHealthCheck",
       "parameters": {
-        "url": "https://example.com",
+        "endpoint": "https://example.com",
         "expectedStatus": 200,
-        "timeoutSeconds": 30
+        "maxRetries": 1
       },
       "dependsOn": ["GcpCloudRunService"]
     },
     "AwsBucketTeardown": {
       "isEnabled": true,
+      "runPolicy": "always",
       "operationType": "DeleteS3Bucket",
       "cloudAccountId": "00000000-bbbb-0000-0000-000000000002",
       "parameters": {
@@ -60,6 +61,7 @@
     },
     "AzureResourceGroupTeardown": {
       "isEnabled": true,
+      "runPolicy": "always",
       "operationType": "DeleteResourceGroup",
       "cloudAccountId": "00000000-aaaa-0000-0000-000000000001",
       "parameters": {

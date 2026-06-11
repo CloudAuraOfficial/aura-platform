@@ -2,7 +2,7 @@
   "baseEssence": {
     "EssenceName": "MultiCloudAzureVNetAwsEc2GcpGcs",
     "EssenceID": "d4e5f6a7-3333-4444-5555-666677778888",
-    "_comment": "Real multi-cloud proof of life: Azure VNet+subnets, AWS VPC+EC2, GCP GCS bucket. Each layer pins its own cloudAccountId. Teardown layers run after the health check.",
+    "_comment": "Real multi-cloud proof of life: Azure VNet+subnets, AWS VPC+EC2, GCP GCS bucket. Each layer pins its own cloudAccountId. Teardown layers are runPolicy: always (#13) — they execute even when an earlier layer fails, so a mid-run failure cannot orphan resources.",
     "uniqueId": "aura-multicloud-vnet-ec2-gcs"
   },
   "layers": {
@@ -78,6 +78,7 @@
     },
     "GcpGcsBucketTeardown": {
       "isEnabled": true,
+      "runPolicy": "always",
       "operationType": "DeleteGcsBucket",
       "cloudAccountId": "7abdff61-7db1-448f-9fdd-60a26b47ca45",
       "parameters": {
@@ -88,6 +89,7 @@
     },
     "AwsEc2Teardown": {
       "isEnabled": true,
+      "runPolicy": "always",
       "operationType": "TerminateEc2Instance",
       "cloudAccountId": "c2359917-6d60-4460-9b1b-c8001538f08f",
       "parameters": {
@@ -97,6 +99,7 @@
     },
     "AwsVpcTeardown": {
       "isEnabled": true,
+      "runPolicy": "always",
       "operationType": "DeleteVpc",
       "cloudAccountId": "c2359917-6d60-4460-9b1b-c8001538f08f",
       "parameters": {
@@ -106,6 +109,7 @@
     },
     "AzureVirtualNetworkTeardown": {
       "isEnabled": true,
+      "runPolicy": "always",
       "operationType": "DeleteVirtualNetwork",
       "cloudAccountId": "b654ac43-12fe-40c2-b561-9d6546abbe07",
       "parameters": {
@@ -116,6 +120,7 @@
     },
     "AzureResourceGroupTeardown": {
       "isEnabled": true,
+      "runPolicy": "always",
       "operationType": "DeleteResourceGroup",
       "cloudAccountId": "b654ac43-12fe-40c2-b561-9d6546abbe07",
       "parameters": {
