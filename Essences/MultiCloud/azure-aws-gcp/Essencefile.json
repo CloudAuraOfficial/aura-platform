@@ -42,9 +42,9 @@
       "isEnabled": true,
       "operationType": "HttpHealthCheck",
       "parameters": {
-        "url": "https://example.com",
+        "endpoint": "https://example.com",
         "expectedStatus": 200,
-        "timeoutSeconds": 30
+        "maxRetries": 1
       },
       "dependsOn": ["GcpCloudRunService"]
     },
