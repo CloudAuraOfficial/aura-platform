@@ -39,7 +39,7 @@ public class DeleteVpcHandler : IOperationHandler
             var vpcs = (await ec2.DescribeVpcsAsync(new DescribeVpcsRequest
             {
                 Filters = new List<Filter> { new() { Name = "tag:Name", Values = new List<string> { vpcName } } },
-            }, ct)).Vpcs;
+            }, ct)).Vpcs ?? new List<Vpc>();
 
             if (vpcs.Count == 0)
                 return new LayerExecutionResult(true, $"VPC '{vpcName}' not found — nothing to delete.");
@@ -52,7 +52,7 @@ public class DeleteVpcHandler : IOperationHandler
             var subnets = (await ec2.DescribeSubnetsAsync(new DescribeSubnetsRequest
             {
                 Filters = new List<Filter> { new() { Name = "vpc-id", Values = new List<string> { vpcId } } },
-            }, ct)).Subnets;
+            }, ct)).Subnets ?? new List<Subnet>();
             foreach (var subnet in subnets)
             {
                 _logger.LogInformation("  Deleting subnet {SubnetId}", subnet.SubnetId);
@@ -63,14 +63,16 @@ public class DeleteVpcHandler : IOperationHandler
             var routeTables = (await ec2.DescribeRouteTablesAsync(new DescribeRouteTablesRequest
             {
                 Filters = new List<Filter> { new() { Name = "vpc-id", Values = new List<string> { vpcId } } },
-            }, ct)).RouteTables;
+            }, ct)).RouteTables ?? new List<RouteTable>();
             foreach (var rt in routeTables)
             {
-                var isMain = rt.Associations.Any(a => a.Main == true);
+                // SDK returns null (not empty) for route tables with no associations
+                var associations = rt.Associations ?? new List<RouteTableAssociation>();
+                var isMain = associations.Any(a => a.Main == true);
                 if (isMain) continue;
 
                 // Drop any subnet associations first
-                foreach (var assoc in rt.Associations.Where(a => !string.IsNullOrEmpty(a.RouteTableAssociationId)))
+                foreach (var assoc in associations.Where(a => !string.IsNullOrEmpty(a.RouteTableAssociationId)))
                 {
                     await ec2.DisassociateRouteTableAsync(new DisassociateRouteTableRequest
                     {
@@ -85,7 +87,7 @@ public class DeleteVpcHandler : IOperationHandler
             var igws = (await ec2.DescribeInternetGatewaysAsync(new DescribeInternetGatewaysRequest
             {
                 Filters = new List<Filter> { new() { Name = "attachment.vpc-id", Values = new List<string> { vpcId } } },
-            }, ct)).InternetGateways;
+            }, ct)).InternetGateways ?? new List<InternetGateway>();
             foreach (var igw in igws)
             {
                 _logger.LogInformation("  Detaching + deleting IGW {IgwId}", igw.InternetGatewayId);
@@ -104,7 +106,7 @@ public class DeleteVpcHandler : IOperationHandler
             var sgs = (await ec2.DescribeSecurityGroupsAsync(new DescribeSecurityGroupsRequest
             {
                 Filters = new List<Filter> { new() { Name = "vpc-id", Values = new List<string> { vpcId } } },
-            }, ct)).SecurityGroups;
+            }, ct)).SecurityGroups ?? new List<SecurityGroup>();
             foreach (var sg in sgs.Where(s => s.GroupName != "default"))
             {
                 _logger.LogInformation("  Deleting security group {SgId}", sg.GroupId);
