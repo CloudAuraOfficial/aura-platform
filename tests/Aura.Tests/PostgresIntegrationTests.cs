@@ -1,4 +1,6 @@
+using Aura.Api.Controllers;
 using Aura.Api.Middleware;
+using Aura.Core.DTOs;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
 using Aura.Infrastructure.Data;
@@ -344,5 +346,73 @@ public class PostgresIntegrationTests : IAsyncLifetime
         Assert.Null(updated.RefreshToken);
         Assert.Null(updated.RefreshTokenExpiresAt);
         Assert.True(AuthHelpers.VerifyPassword("NewPass1!", updated.PasswordHash));
+    }
+
+    [Fact]
+    public async Task DeploymentsList_EmbedsLatestRun_ViaSingleBatchedQuery()
+    {
+        var tenantId = Guid.NewGuid();
+        using (var seed = CreateDb())
+        {
+            var tenant = new Tenant { Id = tenantId, Name = "LatestRun", Slug = "latest-run" };
+            seed.Tenants.Add(tenant);
+            var account = new CloudAccount
+            {
+                TenantId = tenantId, Provider = CloudProvider.Azure,
+                Label = "Test", EncryptedCredentials = "enc"
+            };
+            seed.CloudAccounts.Add(account);
+            await seed.SaveChangesAsync();
+
+            var essence = new Essence
+            {
+                TenantId = tenantId, Name = "E", CloudAccountId = account.Id,
+                EssenceJson = "{}", CurrentVersion = 1
+            };
+            seed.Essences.Add(essence);
+            await seed.SaveChangesAsync();
+
+            var withRuns = new Deployment { TenantId = tenantId, EssenceId = essence.Id, Name = "with-runs", IsEnabled = true };
+            var oneRun = new Deployment { TenantId = tenantId, EssenceId = essence.Id, Name = "one-run", IsEnabled = true };
+            var noRuns = new Deployment { TenantId = tenantId, EssenceId = essence.Id, Name = "no-runs", IsEnabled = true };
+            seed.Deployments.AddRange(withRuns, oneRun, noRuns);
+            await seed.SaveChangesAsync();
+
+            var older = new DeploymentRun
+            { TenantId = tenantId, DeploymentId = withRuns.Id, Status = RunStatus.Succeeded };
+            var newest = new DeploymentRun
+            { TenantId = tenantId, DeploymentId = withRuns.Id, Status = RunStatus.Running };
+            var failed = new DeploymentRun
+            { TenantId = tenantId, DeploymentId = oneRun.Id, Status = RunStatus.Failed };
+            seed.DeploymentRuns.AddRange(older, newest, failed);
+            await seed.SaveChangesAsync();
+
+            // SaveChangesAsync stamps CreatedAt = UtcNow on Added entities,
+            // so apply the intended ordering afterwards (Modified entries
+            // are not re-stamped).
+            older.CreatedAt = DateTime.UtcNow.AddMinutes(-10);
+            newest.CreatedAt = DateTime.UtcNow.AddMinutes(-1);
+            failed.CreatedAt = DateTime.UtcNow.AddMinutes(-5);
+            await seed.SaveChangesAsync();
+
+            using var db = CreateDb(tenantId);
+            var controller = new DeploymentsController(
+                db,
+                Mock.Of<Core.Interfaces.ITenantContext>(t => t.TenantId == tenantId),
+                Mock.Of<Core.Interfaces.IDeploymentOrchestrationService>(),
+                Mock.Of<Core.Interfaces.ICloudCostEstimatorFactory>());
+
+            var result = await controller.List(0, 25);
+            var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
+            var page = Assert.IsType<PaginatedResponse<DeploymentResponse>>(ok.Value);
+            var byName = page.Items.ToDictionary(d => d.Name);
+
+            // Newest run wins for the multi-run deployment (real Postgres
+            // validates the GroupBy -> First translation).
+            Assert.Equal(newest.Id, byName["with-runs"].LatestRun!.Id);
+            Assert.Equal("Running", byName["with-runs"].LatestRun!.Status);
+            Assert.Equal(failed.Id, byName["one-run"].LatestRun!.Id);
+            Assert.Null(byName["no-runs"].LatestRun);
+        }
     }
 }
