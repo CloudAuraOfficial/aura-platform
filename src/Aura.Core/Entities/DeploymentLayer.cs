@@ -22,6 +22,10 @@ public class DeploymentLayer : BaseEntity
     // that span multiple subscriptions or multiple cloud providers.
     public Guid? CloudAccountId { get; set; }
 
+    // Finally-semantics for teardown/cleanup layers (#13). Always-run layers
+    // execute even after an earlier layer has failed.
+    public RunPolicy RunPolicy { get; set; } = RunPolicy.OnSuccess;
+
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
 }
