@@ -1,0 +1,45 @@
+{
+  "baseEssence": {
+    "name": "Demo — Safe Pipeline",
+    "description": "Cloud-free simulated infrastructure pipeline for live demos. Every layer runs locally inside the worker — no provider credentials, no cost, no quotas, no network dependency. Total runtime ~30s.",
+    "cloudProvider": "Azure",
+    "defaultRegion": "local"
+  },
+  "layers": {
+    "Preflight": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "/app/demo-scripts/preflight.ps1",
+      "parameters": { "targetEnv": "demo" },
+      "dependsOn": []
+    },
+    "ProvisionNetwork": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "/app/demo-scripts/provision-network.ps1",
+      "parameters": { "cidr": "10.42.0.0/16", "subnets": "3" },
+      "dependsOn": ["Preflight"]
+    },
+    "ProvisionCompute": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "/app/demo-scripts/provision-compute.ps1",
+      "parameters": { "instances": "2", "size": "Standard_B2s" },
+      "dependsOn": ["ProvisionNetwork"]
+    },
+    "DeployApplication": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "/app/demo-scripts/deploy-application.ps1",
+      "parameters": { "image": "aura-demo-app:1.4.2", "replicas": "2" },
+      "dependsOn": ["ProvisionCompute"]
+    },
+    "SmokeTest": {
+      "isEnabled": true,
+      "executorType": "powershell",
+      "scriptPath": "/app/demo-scripts/smoke-test.ps1",
+      "parameters": { "endpoints": "4" },
+      "dependsOn": ["DeployApplication"]
+    }
+  }
+}
