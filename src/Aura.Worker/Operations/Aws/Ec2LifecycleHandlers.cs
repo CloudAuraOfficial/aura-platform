@@ -130,15 +130,34 @@ public class TerminateEc2InstanceHandler : IOperationHandler
                 InstanceIds = new List<string> { instance.InstanceId },
             }, ct);
 
-            // Best-effort SG cleanup — the SG can't be deleted while the ENI is still attached.
-            // We don't block on instance termination; teardown will retry on the next run.
+            // Wait for the instance to actually reach 'terminated'. Termination
+            // is asynchronous; reporting success at 'requested' lets downstream
+            // teardown layers (e.g. DeleteVpc) race the dying instance and fail
+            // with DependencyViolation — the subnet still holds its ENI (#12).
+            var waitDeadline = DateTime.UtcNow.AddMinutes(5);
+            var terminated = false;
+            while (DateTime.UtcNow < waitDeadline)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(10), ct);
+                var state = (await ec2.DescribeInstancesAsync(new DescribeInstancesRequest
+                {
+                    InstanceIds = new List<string> { instance.InstanceId },
+                }, ct)).Reservations?.FirstOrDefault()?.Instances?.FirstOrDefault()?.State?.Name;
+                _logger.LogInformation("  EC2 {InstanceId} state: {State}", instance.InstanceId, state?.Value);
+                if (state == InstanceStateName.Terminated) { terminated = true; break; }
+            }
+            if (!terminated)
+                return new LayerExecutionResult(false,
+                    $"EC2 '{instanceName}' ({instance.InstanceId}) did not reach 'terminated' within 5 minutes.");
+
+            // SG cleanup — safe now that the ENI is released.
             var sgName = $"{instanceName}-sg";
             try
             {
                 var sgs = (await ec2.DescribeSecurityGroupsAsync(new DescribeSecurityGroupsRequest
                 {
                     Filters = new List<Filter> { new() { Name = "group-name", Values = new List<string> { sgName } } },
-                }, ct)).SecurityGroups;
+                }, ct)).SecurityGroups ?? new List<SecurityGroup>();
                 foreach (var sg in sgs)
                 {
                     await ec2.DeleteSecurityGroupAsync(new DeleteSecurityGroupRequest { GroupId = sg.GroupId }, ct);
@@ -149,7 +168,7 @@ public class TerminateEc2InstanceHandler : IOperationHandler
                 _logger.LogDebug("SG cleanup skipped for {SgName}: {ErrorCode}", sgName, ex.ErrorCode);
             }
 
-            return new LayerExecutionResult(true, $"EC2 '{instanceName}' ({instance.InstanceId}) terminate requested.");
+            return new LayerExecutionResult(true, $"EC2 '{instanceName}' ({instance.InstanceId}) terminated.");
         }
         catch (AmazonEC2Exception ex)
         {
