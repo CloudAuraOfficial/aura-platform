@@ -24,5 +24,16 @@ public sealed record DeploymentResponse(
     string? CronExpression,
     string? WebhookUrl,
     bool IsEnabled,
-    DateTime CreatedAt
+    DateTime CreatedAt,
+    LatestRunSummary? LatestRun = null
+);
+
+/// <summary>Slim latest-run projection embedded in deployment list items
+/// so the dashboard doesn't need a per-deployment runs query.</summary>
+public sealed record LatestRunSummary(
+    Guid Id,
+    string Status,
+    DateTime CreatedAt,
+    DateTime? StartedAt,
+    DateTime? CompletedAt
 );

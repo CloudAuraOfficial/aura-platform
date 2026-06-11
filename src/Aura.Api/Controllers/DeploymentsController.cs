@@ -38,8 +38,21 @@ public class DeploymentsController : ControllerBase
         (offset, limit) = PaginationDefaults.Clamp(offset, limit);
         var query = _db.Deployments.OrderBy(d => d.CreatedAt);
         var total = await query.CountAsync();
-        var items = await query.Skip(offset).Take(limit)
-            .Select(d => ToDto(d)).ToListAsync();
+        var deployments = await query.Skip(offset).Take(limit).ToListAsync();
+
+        // One batched query for every page item's newest run — the dashboard
+        // previously issued a runs?limit=1 request per deployment (N+1).
+        var ids = deployments.Select(d => d.Id).ToList();
+        var latestByDeployment = (await _db.DeploymentRuns
+                .Where(r => ids.Contains(r.DeploymentId))
+                .GroupBy(r => r.DeploymentId)
+                .Select(g => g.OrderByDescending(r => r.CreatedAt).ThenByDescending(r => r.Id).First())
+                .ToListAsync())
+            .ToDictionary(r => r.DeploymentId);
+
+        var items = deployments
+            .Select(d => ToDto(d, latestByDeployment.GetValueOrDefault(d.Id)))
+            .ToList();
 
         return Ok(new PaginatedResponse<DeploymentResponse>(items, total, offset, limit));
     }
@@ -294,8 +307,12 @@ public class DeploymentsController : ControllerBase
         return CloudProvider.Azure;
     }
 
-    private static DeploymentResponse ToDto(Deployment d) =>
-        new(d.Id, d.EssenceId, d.Name, d.CronExpression, d.WebhookUrl, d.IsEnabled, d.CreatedAt);
+    private static DeploymentResponse ToDto(Deployment d, DeploymentRun? latestRun = null) =>
+        new(d.Id, d.EssenceId, d.Name, d.CronExpression, d.WebhookUrl, d.IsEnabled, d.CreatedAt,
+            latestRun is null
+                ? null
+                : new LatestRunSummary(latestRun.Id, latestRun.Status.ToString(),
+                    latestRun.CreatedAt, latestRun.StartedAt, latestRun.CompletedAt));
 
     private static DeploymentRunResponse ToRunDto(DeploymentRun r) =>
         new(r.Id, r.DeploymentId, r.Status.ToString(), r.SnapshotJson,
