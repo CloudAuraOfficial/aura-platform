@@ -190,16 +190,32 @@ public class RunWorkerService : BackgroundService
         var auditedAccounts = new HashSet<Guid>();
         var auditService = scope.ServiceProvider.GetRequiredService<IAuditService>();
 
-        // Execute layers in topological order
+        // Execute layers in topological order.
+        //
+        // #13 finally-semantics: RunPolicy.Always layers (teardown/cleanup)
+        // execute even after an earlier layer has failed — the global fail-stop
+        // only applies to OnSuccess layers. An Always layer is skipped solely
+        // when one of its own dependsOn ancestors that is itself Always did not
+        // succeed (its cleanup would fail anyway, e.g. DeleteVpc behind a
+        // failed EC2 termination). Dependencies on non-Always layers are
+        // ordering-only. Cancellation is unchanged: a user cancel aborts
+        // cleanup layers too.
         var failed = false;
+        var alwaysLayers = run.Layers
+            .Where(l => l.RunPolicy == RunPolicy.Always)
+            .Select(l => l.LayerName)
+            .ToHashSet();
+        var outcomes = new Dictionary<string, LayerStatus>();
         foreach (var layer in run.Layers.OrderBy(l => l.SortOrder))
         {
-            if (failed)
+            var skipReason = ComputeSkipReason(layer, failed, alwaysLayers, outcomes);
+            if (skipReason is not null)
             {
                 layer.Status = LayerStatus.Skipped;
                 layer.CompletedAt = DateTime.UtcNow;
+                outcomes[layer.LayerName] = LayerStatus.Skipped;
                 await PublishLogSafe(logStream, runId,
-                    $"[{layer.LayerName}] Skipped (previous layer failed)", ct);
+                    $"[{layer.LayerName}] Skipped ({skipReason})", ct);
                 continue;
             }
 
@@ -242,6 +258,7 @@ public class RunWorkerService : BackgroundService
                 layer.Output = TruncateOutput(result.Output);
                 layer.Status = result.Success ? LayerStatus.Succeeded : LayerStatus.Failed;
                 layer.CompletedAt = DateTime.UtcNow;
+                outcomes[layer.LayerName] = layer.Status;
                 layerActivity?.SetTag("layer.status", layer.Status.ToString());
                 if (!result.Success)
                     layerActivity?.SetStatus(ActivityStatusCode.Error, result.Output?[..Math.Min(200, result.Output?.Length ?? 0)]);
@@ -291,6 +308,7 @@ public class RunWorkerService : BackgroundService
                 layer.Output = TruncateOutput(ex.Message);
                 layer.Status = LayerStatus.Failed;
                 layer.CompletedAt = DateTime.UtcNow;
+                outcomes[layer.LayerName] = LayerStatus.Failed;
                 layerActivity?.SetTag("layer.status", "Failed");
                 layerActivity?.SetStatus(ActivityStatusCode.Error, ex.Message[..Math.Min(200, ex.Message.Length)]);
                 failed = true;
@@ -359,6 +377,32 @@ public class RunWorkerService : BackgroundService
     /// <summary>
     /// Best-effort log publishing — never lets a Redis failure break run execution.
     /// </summary>
+    /// <summary>
+    /// #13 skip decision. OnSuccess layers obey the global fail-stop. Always
+    /// layers run regardless of it, and are skipped only when one of their own
+    /// dependsOn ancestors that is itself Always did not succeed — its cleanup
+    /// would fail anyway (e.g. DeleteVpc behind a failed EC2 termination).
+    /// Returns the skip reason, or null when the layer should execute.
+    /// </summary>
+    internal static string? ComputeSkipReason(
+        DeploymentLayer layer,
+        bool failed,
+        HashSet<string> alwaysLayers,
+        Dictionary<string, LayerStatus> outcomes)
+    {
+        if (layer.RunPolicy == RunPolicy.Always)
+        {
+            var dependsOn = JsonSerializer.Deserialize<List<string>>(layer.DependsOn) ?? new();
+            var blockedBy = dependsOn.FirstOrDefault(d =>
+                alwaysLayers.Contains(d)
+                && outcomes.TryGetValue(d, out var s)
+                && s != LayerStatus.Succeeded);
+            return blockedBy is null ? null : $"cleanup dependency '{blockedBy}' did not succeed";
+        }
+
+        return failed ? "previous layer failed" : null;
+    }
+
     private async Task PublishLogSafe(ILogStreamService logStream, Guid runId, string message, CancellationToken ct)
     {
         try
