@@ -50,17 +50,30 @@ api() { # api METHOD PATH [JSON_BODY]
 curl -sf "${AURA_URL}/health" > /dev/null || fail "API not reachable at ${AURA_URL}"
 
 # ── 1. Bootstrap or login ─────────────────────────────────────────────
+# Bodies are built by python3 (proper JSON escaping for quotes in
+# user-supplied values) and passed via stdin so the password never
+# appears in process arguments.
+auth_body() { # auth_body bootstrap|login
+    DEMO_EMAIL="$DEMO_EMAIL" DEMO_PASSWORD="$DEMO_PASSWORD" DEMO_TENANT="$DEMO_TENANT" \
+    python3 -c "
+import json, os, sys
+b = {'email': os.environ['DEMO_EMAIL'], 'password': os.environ['DEMO_PASSWORD']}
+if sys.argv[1] == 'bootstrap':
+    b['tenantName'] = os.environ['DEMO_TENANT']
+print(json.dumps(b))" "$1"
+}
+
 say "bootstrap attempt (tenant '${DEMO_TENANT}')…"
-BOOT=$(curl -s -X POST "${AURA_URL}/api/v1/auth/bootstrap" -H "Content-Type: application/json" \
-    -d "{\"email\":\"${DEMO_EMAIL}\",\"password\":\"${DEMO_PASSWORD}\",\"tenantName\":\"${DEMO_TENANT}\"}")
+BOOT=$(auth_body bootstrap | curl -s -X POST "${AURA_URL}/api/v1/auth/bootstrap" \
+    -H "Content-Type: application/json" -d @-)
 if [[ "$(echo "$BOOT" | jget "['error']")" == "conflict" ]]; then
     say "platform already bootstrapped — logging in as ${DEMO_EMAIL}"
 else
     say "bootstrapped fresh tenant '${DEMO_TENANT}' with admin ${DEMO_EMAIL}"
 fi
 
-LOGIN=$(curl -s -X POST "${AURA_URL}/api/v1/auth/login" -H "Content-Type: application/json" \
-    -d "{\"email\":\"${DEMO_EMAIL}\",\"password\":\"${DEMO_PASSWORD}\"}")
+LOGIN=$(auth_body login | curl -s -X POST "${AURA_URL}/api/v1/auth/login" \
+    -H "Content-Type: application/json" -d @-)
 TOKEN=$(echo "$LOGIN" | jget "['token']")
 [[ -n "$TOKEN" ]] || fail "login failed for ${DEMO_EMAIL}: $LOGIN
   (on an existing DB, pass that tenant's admin via DEMO_EMAIL/DEMO_PASSWORD)"
@@ -138,6 +151,7 @@ for i in $(seq 1 "$DEMO_RUNS"); do
     RUN_ID=$(echo "$RUN" | jget "['id']")
     [[ -n "$RUN_ID" ]] || fail "run trigger failed: $RUN"
     say "run ${i}/${DEMO_RUNS} triggered (${RUN_ID}) — waiting…"
+    STATUS=""
     for _ in $(seq 1 60); do
         sleep 3
         STATUS=$(api GET "/api/v1/deployments/${DEPLOYMENT_ID}/runs/${RUN_ID}" | jget "['status']")
