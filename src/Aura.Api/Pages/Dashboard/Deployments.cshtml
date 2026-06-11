@@ -202,6 +202,12 @@ async function cancelRunDirect(deploymentId, runId) {
 
 const ACTIVE_STATES = ['Queued', 'Running', 'Pending'];
 let refreshTimer = null;
+let deploymentsById = {};
+
+// Look up from the cache instead of inlining JSON/names into onclick
+// attributes — names containing quotes would break the attribute boundary.
+function openEditById(id) { const d = deploymentsById[id]; if (d) openEdit(d); }
+function deleteDeploymentById(id) { const d = deploymentsById[id]; if (d) deleteDeployment(d.id, d.name); }
 
 async function loadDeployments() {
     const data = await api('/api/v1/deployments?limit=100');
@@ -209,6 +215,7 @@ async function loadDeployments() {
         document.getElementById('content').innerHTML = '<div class="empty">No deployments yet. Create your first one!</div>';
         return;
     }
+    deploymentsById = Object.fromEntries(data.items.map(d => [d.id, d]));
 
     // latestRun now ships inside the list response — no per-row runs query.
     let html = '<table><thead><tr><th>Name</th><th>Essence</th><th>Cron</th><th>Enabled</th><th>Latest Run</th><th>Actions</th></tr></thead><tbody>';
@@ -227,8 +234,8 @@ async function loadDeployments() {
             <td class="actions">
                 <button class="btn btn-primary btn-sm" onclick="triggerRun('${d.id}')">Run</button>
                 <button class="btn btn-secondary btn-sm" onclick="viewRuns('${d.id}')">Runs</button>
-                <button class="btn btn-secondary btn-sm" onclick='openEdit(${JSON.stringify(d)})'>Edit</button>
-                <button class="btn btn-danger btn-sm" onclick="deleteDeployment('${d.id}','${d.name.replace(/'/g,"\\'")}')">Delete</button>
+                <button class="btn btn-secondary btn-sm" onclick="openEditById('${d.id}')">Edit</button>
+                <button class="btn btn-danger btn-sm" onclick="deleteDeploymentById('${d.id}')">Delete</button>
             </td>
         </tr>`;
     }
