@@ -158,6 +158,12 @@ async function deleteDeployment(id, name) {
 
 async function triggerRun(deploymentId) {
     const data = await api(`/api/v1/deployments/${deploymentId}/runs`, { method: 'POST' });
+    if (data?.error) { toast(data.message || 'Failed to trigger run', 'error'); return; }
+    if (data?.id) {
+        // Straight into the Run Theater — watch it execute live
+        window.location.href = `/dashboard/run?deploymentId=${encodeURIComponent(deploymentId)}&runId=${encodeURIComponent(data.id)}`;
+        return;
+    }
     if (data) { toast('Run triggered'); loadDeployments(); }
 }
 
@@ -176,7 +182,10 @@ async function viewRuns(deploymentId) {
             return `<tr>
                 <td>${badge(r.status)}</td><td>${started}</td><td>${completed}</td>
                 <td>${r.layers?.length || '-'}</td>
-                <td>${canCancel ? `<button class="btn btn-danger btn-sm" onclick="cancelRunDirect('${deploymentId}','${r.id}')">Cancel</button>` : ''}</td>
+                <td class="actions">
+                    <a class="btn btn-secondary btn-sm" href="/dashboard/run?deploymentId=${deploymentId}&runId=${r.id}">View</a>
+                    ${canCancel ? `<button class="btn btn-danger btn-sm" onclick="cancelRunDirect('${deploymentId}','${r.id}')">Cancel</button>` : ''}
+                </td>
             </tr>`;
         }).join('')}</tbody></table>`;
     }

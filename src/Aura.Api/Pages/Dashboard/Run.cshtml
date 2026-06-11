@@ -1,0 +1,229 @@
+@page "/dashboard/run"
+@{
+    ViewData["Title"] = "Run";
+    Layout = "/Pages/Shared/_Layout.cshtml";
+}
+
+<div class="toolbar">
+    <h1 id="runTitle">Run</h1>
+    <div>
+        <button class="btn btn-danger" id="cancelBtn" style="display:none" onclick="cancelRun()">Cancel Run</button>
+        <a class="btn btn-secondary" href="/dashboard/deployments">Back to Deployments</a>
+    </div>
+</div>
+
+<div class="run-meta" id="runMeta">
+    <div class="run-meta-item"><span class="run-meta-label">Status</span><span id="mStatus">—</span></div>
+    <div class="run-meta-item"><span class="run-meta-label">Started</span><span id="mStarted">—</span></div>
+    <div class="run-meta-item"><span class="run-meta-label">Elapsed</span><span id="mElapsed" class="mono">—</span></div>
+    <div class="run-meta-item"><span class="run-meta-label">Est. Cost</span><span id="mCost">—</span></div>
+</div>
+
+<div class="run-grid">
+    <div class="pipeline-panel">
+        <div class="panel-title">Layer Pipeline</div>
+        <div id="pipeline"><div class="empty">Loading…</div></div>
+    </div>
+    <div class="log-panel">
+        <div class="panel-title">
+            <span id="logTitle">Live Logs</span>
+            <label class="log-follow"><input type="checkbox" id="followToggle" checked /> follow</label>
+        </div>
+        <div class="log-pane" id="logPane"></div>
+    </div>
+</div>
+
+<script>
+const token = localStorage.getItem('aura_token');
+if (!token) window.location.href = '/dashboard/login';
+
+const params = new URLSearchParams(window.location.search);
+const deploymentId = params.get('deploymentId');
+const runId = params.get('runId');
+if (!deploymentId || !runId) window.location.href = '/dashboard/deployments';
+
+const ACTIVE = ['Queued', 'Running', 'Pending'];
+let run = null;
+let pollTimer = null, tickTimer = null;
+let streaming = false, streamRetried = false;
+
+async function api(path, opts = {}) {
+    const res = await fetch(path, {
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        ...opts
+    });
+    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
+    if (res.status === 204) return {};
+    return await res.json();
+}
+
+function toast(msg, type = 'success') {
+    const el = document.createElement('div');
+    el.className = `toast toast-${type}`;
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3000);
+}
+
+function badge(status) {
+    const map = { Succeeded: 'success', Failed: 'danger', Running: 'warning', Queued: 'info', Cancelled: 'muted', Pending: 'muted' };
+    return `<span class="badge badge-${map[status] || 'muted'}">${esc(status)}</span>`;
+}
+
+function fmtDur(ms) {
+    if (ms == null || ms < 0) return '—';
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60), sec = s % 60;
+    return m > 0 ? `${m}m ${String(sec).padStart(2, '0')}s` : `${sec}s`;
+}
+
+function layerDur(l) {
+    if (!l.startedAt) return '';
+    const end = l.completedAt ? new Date(l.completedAt) : new Date();
+    return fmtDur(end - new Date(l.startedAt));
+}
+
+function renderMeta() {
+    document.getElementById('mStatus').innerHTML = badge(run.status);
+    document.getElementById('mStarted').textContent = run.startedAt ? new Date(run.startedAt).toLocaleString() : 'not started';
+    document.getElementById('mCost').textContent = run.estimatedCostUsd != null ? '$' + Number(run.estimatedCostUsd).toFixed(4) : '—';
+    document.getElementById('cancelBtn').style.display = ACTIVE.includes(run.status) ? '' : 'none';
+    renderElapsed();
+}
+
+function renderElapsed() {
+    if (!run?.startedAt) { document.getElementById('mElapsed').textContent = '—'; return; }
+    const end = run.completedAt ? new Date(run.completedAt) : new Date();
+    document.getElementById('mElapsed').textContent = fmtDur(end - new Date(run.startedAt));
+}
+
+function renderPipeline() {
+    const layers = (run.layers || []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
+    if (!layers.length) {
+        document.getElementById('pipeline').innerHTML = '<div class="empty">No layers</div>';
+        return;
+    }
+    document.getElementById('pipeline').innerHTML = layers.map((l, i) => `
+        <div class="layer-item layer-${(l.status || 'Pending').toLowerCase()}" onclick="showLayerOutput(${i})" title="Click to view captured output">
+            <div class="layer-chip"></div>
+            <div class="layer-body">
+                <div class="layer-name">${esc(l.layerName)}</div>
+                <div class="layer-sub"><code>${esc(l.executorType)}</code>${l.dependsOn ? ' · after ' + esc(l.dependsOn) : ''}</div>
+            </div>
+            <div class="layer-right">
+                ${badge(l.status || 'Pending')}
+                <div class="layer-dur mono">${layerDur(l)}</div>
+            </div>
+        </div>`).join('');
+}
+
+function showLayerOutput(i) {
+    const layers = (run?.layers || []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
+    const l = layers[i];
+    if (!l) return;
+    if (streaming) return; // live stream owns the pane while the run is active
+    document.getElementById('logTitle').textContent = `Output — ${l.layerName}`;
+    const pane = document.getElementById('logPane');
+    pane.textContent = l.output || '(no captured output for this layer)';
+    pane.scrollTop = 0;
+}
+
+function appendLog(line) {
+    const pane = document.getElementById('logPane');
+    const el = document.createElement('div');
+    el.className = 'log-line';
+    el.textContent = line;
+    pane.appendChild(el);
+    if (document.getElementById('followToggle').checked) pane.scrollTop = pane.scrollHeight;
+}
+
+// SSE over fetch — EventSource cannot send the Authorization header.
+async function streamLogs() {
+    streaming = true;
+    document.getElementById('logTitle').textContent = 'Live Logs';
+    try {
+        const res = await fetch(`/api/v1/deployments/${deploymentId}/runs/${runId}/logs/stream`, {
+            headers: { 'Authorization': 'Bearer ' + token }
+        });
+        if (!res.ok || !res.body) throw new Error('stream unavailable (' + res.status + ')');
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        try {
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buf += decoder.decode(value, { stream: true });
+                let idx;
+                while ((idx = buf.indexOf('\n\n')) >= 0) {
+                    const event = buf.slice(0, idx); buf = buf.slice(idx + 2);
+                    // SSE spec: multi-line payloads arrive as repeated `data:` lines
+                    // within one event and must be re-joined with \n.
+                    const data = event.split('\n')
+                        .filter(l => l.startsWith('data: '))
+                        .map(l => l.slice(6))
+                        .join('\n');
+                    if (data === '') continue;
+                    streamRetried = false; // healthy stream → allow a future reconnect
+                    if (data === '[done]') { finishStream(); return; }
+                    appendLog(data);
+                }
+            }
+        } finally {
+            reader.cancel().catch(() => {});
+        }
+        finishStream();
+    } catch (err) {
+        streaming = false;
+        if (!streamRetried && ACTIVE.includes(run?.status)) {
+            streamRetried = true;
+            appendLog('… log stream interrupted, reconnecting …');
+            setTimeout(streamLogs, 2000);
+        } else {
+            appendLog('… log stream closed (' + err.message + ')');
+        }
+    }
+}
+
+function finishStream() {
+    streaming = false;
+    appendLog('— run complete —');
+    refresh(); // pick up final statuses immediately
+}
+
+async function refresh() {
+    const data = await api(`/api/v1/deployments/${deploymentId}/runs/${runId}`);
+    if (!data || data.error) return;
+    run = data;
+    renderMeta();
+    renderPipeline();
+    if (!ACTIVE.includes(run.status)) {
+        clearInterval(pollTimer); pollTimer = null;
+        clearInterval(tickTimer); tickTimer = null;
+        renderElapsed();
+        if (!streaming && !document.getElementById('logPane').hasChildNodes()) {
+            document.getElementById('logTitle').textContent = 'Logs';
+            document.getElementById('logPane').textContent =
+                'Run already completed — click a layer to view its captured output.';
+        }
+    }
+}
+
+async function cancelRun() {
+    if (!confirm('Cancel this run?')) return;
+    await api(`/api/v1/deployments/${deploymentId}/runs/${runId}/cancel`, { method: 'POST' });
+    toast('Cancel requested');
+    refresh();
+}
+
+(async () => {
+    const dep = await api(`/api/v1/deployments/${deploymentId}`);
+    if (dep && !dep.error) document.getElementById('runTitle').textContent = `Run — ${dep.name}`;
+    await refresh();
+    if (run && ACTIVE.includes(run.status)) {
+        streamLogs();
+        pollTimer = setInterval(refresh, 3000);
+        tickTimer = setInterval(() => { renderElapsed(); renderPipeline(); }, 1000);
+    }
+})();
+</script>

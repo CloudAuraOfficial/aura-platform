@@ -59,7 +59,7 @@ async function loadDashboard() {
         </tr></thead><tbody>${runs.map(r => {
             const started = r.startedAt ? new Date(r.startedAt).toLocaleString() : '-';
             const dur = r.startedAt && r.completedAt ? Math.round((new Date(r.completedAt) - new Date(r.startedAt))/1000) + 's' : '-';
-            return `<tr><td>${esc(r.deploymentName)}</td><td>${badge(r.status)}</td>
+            return `<tr><td><a href="/dashboard/run?deploymentId=${r.deploymentId}&runId=${r.id}">${esc(r.deploymentName)}</a></td><td>${badge(r.status)}</td>
                 <td>${r.layerCount}</td><td>${started}</td><td>${dur}</td><td>${formatCost(r.estimatedCostUsd)}</td></tr>`;
         }).join('')}</tbody></table>`;
     } else if (runs) {
