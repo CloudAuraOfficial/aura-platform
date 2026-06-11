@@ -59,6 +59,10 @@ COPY --from=publish-worker /app/worker .
 COPY Essences/Aura/multi-executor-vm/scripts/ /app/scripts/
 COPY Essences/Aura/multi-executor-vm/templates/ /app/templates/
 
+# Demo safe-pipeline scripts — referenced by absolute scriptPath from the
+# "Demo — Safe Pipeline" essence so live demos never touch a real cloud.
+COPY Essences/Demo/safe-pipeline/scripts/ /app/demo-scripts/
+
 RUN chown -R aura:aura /app
 USER aura
 ENTRYPOINT ["dotnet", "Aura.Worker.dll"]
