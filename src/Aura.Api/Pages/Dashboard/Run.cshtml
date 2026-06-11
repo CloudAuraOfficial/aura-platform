@@ -118,8 +118,9 @@ function renderPipeline() {
 }
 
 function showLayerOutput(i) {
-    const layers = (run.layers || []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
+    const layers = (run?.layers || []).slice().sort((a, b) => a.sortOrder - b.sortOrder);
     const l = layers[i];
+    if (!l) return;
     if (streaming) return; // live stream owns the pane while the run is active
     document.getElementById('logTitle').textContent = `Output — ${l.layerName}`;
     const pane = document.getElementById('logPane');
@@ -148,20 +149,28 @@ async function streamLogs() {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
-        for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            let idx;
-            while ((idx = buf.indexOf('\n\n')) >= 0) {
-                const event = buf.slice(0, idx); buf = buf.slice(idx + 2);
-                for (const line of event.split('\n')) {
-                    if (!line.startsWith('data: ')) continue;
-                    const data = line.slice(6);
+        try {
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buf += decoder.decode(value, { stream: true });
+                let idx;
+                while ((idx = buf.indexOf('\n\n')) >= 0) {
+                    const event = buf.slice(0, idx); buf = buf.slice(idx + 2);
+                    // SSE spec: multi-line payloads arrive as repeated `data:` lines
+                    // within one event and must be re-joined with \n.
+                    const data = event.split('\n')
+                        .filter(l => l.startsWith('data: '))
+                        .map(l => l.slice(6))
+                        .join('\n');
+                    if (data === '') continue;
+                    streamRetried = false; // healthy stream → allow a future reconnect
                     if (data === '[done]') { finishStream(); return; }
                     appendLog(data);
                 }
             }
+        } finally {
+            reader.cancel().catch(() => {});
         }
         finishStream();
     } catch (err) {

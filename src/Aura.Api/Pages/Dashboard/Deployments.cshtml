@@ -161,7 +161,7 @@ async function triggerRun(deploymentId) {
     if (data?.error) { toast(data.message || 'Failed to trigger run', 'error'); return; }
     if (data?.id) {
         // Straight into the Run Theater — watch it execute live
-        window.location.href = `/dashboard/run?deploymentId=${deploymentId}&runId=${data.id}`;
+        window.location.href = `/dashboard/run?deploymentId=${encodeURIComponent(deploymentId)}&runId=${encodeURIComponent(data.id)}`;
         return;
     }
     if (data) { toast('Run triggered'); loadDeployments(); }
