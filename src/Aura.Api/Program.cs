@@ -128,7 +128,8 @@ builder.Services.AddSingleton<ILlmProviderFactory>(sp =>
     var providers = new ILlmProvider[]
     {
         new OpenAiLlmProvider(httpFactory.CreateClient("llm")),
-        new AnthropicLlmProvider(httpFactory.CreateClient("llm"))
+        new AnthropicLlmProvider(httpFactory.CreateClient("llm")),
+        new OpenRouterLlmProvider(httpFactory.CreateClient("llm"))
     };
     return new LlmProviderFactory(providers);
 });

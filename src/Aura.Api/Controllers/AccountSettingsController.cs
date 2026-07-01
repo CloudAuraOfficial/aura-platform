@@ -19,7 +19,7 @@ public class AccountSettingsController : ControllerBase
 
     private static readonly HashSet<string> SupportedProviders = new(StringComparer.OrdinalIgnoreCase)
     {
-        "openai", "anthropic"
+        "openai", "anthropic", "openrouter"
     };
 
     public AccountSettingsController(AuraDbContext db, ITenantContext tenant, ICryptoService crypto)
@@ -127,7 +127,8 @@ public class AccountSettingsController : ControllerBase
         var providers = new[]
         {
             new { name = "openai", label = "OpenAI", models = new[] { "gpt-4o", "gpt-4o-mini" } },
-            new { name = "anthropic", label = "Anthropic", models = new[] { "claude-sonnet-4-20250514", "claude-haiku-4-5-20251001" } }
+            new { name = "anthropic", label = "Anthropic", models = new[] { "claude-sonnet-4-20250514", "claude-haiku-4-5-20251001" } },
+            new { name = "openrouter", label = "OpenRouter", models = new[] { "openai/gpt-4o", "anthropic/claude-sonnet-4", "google/gemini-2.5-pro" } }
         };
         return Ok(providers);
     }
