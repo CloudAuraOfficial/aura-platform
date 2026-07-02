@@ -13,15 +13,31 @@ public class OperationExecutor : ILayerExecutor
     private readonly IServiceProvider _serviceProvider;
     private readonly OperationRegistry _registry;
     private readonly ILogger<OperationExecutor> _logger;
+    private readonly TimeSpan _operationTimeout;
 
     public OperationExecutor(
         IServiceProvider serviceProvider,
         OperationRegistry registry,
-        ILogger<OperationExecutor> logger)
+        ILogger<OperationExecutor> logger,
+        TimeSpan? operationTimeout = null)
     {
         _serviceProvider = serviceProvider;
         _registry = registry;
         _logger = logger;
+        _operationTimeout = operationTimeout ?? ResolveTimeoutFromEnv();
+    }
+
+    // Client-side ceiling on a single cloud operation (#16): the Azure/AWS/GCP SDK
+    // long-running-operation calls (WaitUntil.Completed) can hang indefinitely — a
+    // VNet creation once sat 19+ min — pinning a worker slot with no upper bound.
+    // Env-tunable; the default is deliberately generous so genuinely slow provisioning
+    // (ARM/AKS) isn't preempted — the point is to bound "forever", not to be aggressive.
+    private static TimeSpan ResolveTimeoutFromEnv()
+    {
+        var raw = Environment.GetEnvironmentVariable("AURA_OPERATION_TIMEOUT_SECONDS");
+        return int.TryParse(raw, out var s) && s > 0
+            ? TimeSpan.FromSeconds(s)
+            : TimeSpan.FromMinutes(30);
     }
 
     public async Task<LayerExecutionResult> ExecuteAsync(
@@ -69,7 +85,25 @@ public class OperationExecutor : ILayerExecutor
             using var doc = JsonDocument.Parse(resolvedParams);
             parameters = doc.RootElement.Clone();
 
-            var result = await handler.ExecuteAsync(layer.LayerName, parameters, envVars, ct);
+            using var opCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            opCts.CancelAfter(_operationTimeout);
+
+            LayerExecutionResult result;
+            try
+            {
+                result = await handler.ExecuteAsync(layer.LayerName, parameters, envVars, opCts.Token);
+            }
+            catch (OperationCanceledException) when (opCts.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                // Our timeout fired (not a caller/shutdown cancellation) → fail fast with a clear message.
+                _logger.LogError("Operation {OperationType} for layer {LayerName} exceeded the {Minutes:0}-min client-side timeout",
+                    operationType, layer.LayerName, _operationTimeout.TotalMinutes);
+                activity?.SetStatus(ActivityStatusCode.Error, "operation timeout");
+                return new LayerExecutionResult(false,
+                    $"Operation '{operationType}' timed out after {_operationTimeout.TotalMinutes:0} min " +
+                    "(client-side ceiling; set AURA_OPERATION_TIMEOUT_SECONDS to adjust).");
+            }
+
             if (!result.Success)
                 activity?.SetStatus(ActivityStatusCode.Error, result.Output?[..Math.Min(200, result.Output?.Length ?? 0)]);
             return result;
