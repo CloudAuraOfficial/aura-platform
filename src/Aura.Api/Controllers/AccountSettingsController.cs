@@ -16,18 +16,21 @@ public class AccountSettingsController : ControllerBase
     private readonly AuraDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly ICryptoService _crypto;
+    private readonly ILlmProviderFactory _providerFactory;
 
-    private static readonly HashSet<string> SupportedProviders = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "openai", "anthropic", "openrouter"
-    };
-
-    public AccountSettingsController(AuraDbContext db, ITenantContext tenant, ICryptoService crypto)
+    public AccountSettingsController(AuraDbContext db, ITenantContext tenant, ICryptoService crypto,
+        ILlmProviderFactory providerFactory)
     {
         _db = db;
         _tenant = tenant;
         _crypto = crypto;
+        _providerFactory = providerFactory;
     }
+
+    // Single source of truth for which providers exist — the DI-registered factory
+    // (#22). No hand-synced allowlist that can drift from the registration.
+    private bool IsSupported(string providerName) =>
+        _providerFactory.SupportedProviders.Any(p => p.Equals(providerName, StringComparison.OrdinalIgnoreCase));
 
     private Guid GetCurrentUserId()
     {
@@ -54,9 +57,9 @@ public class AccountSettingsController : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateAiProviderRequest request)
     {
         var providerName = request.ProviderName.ToLowerInvariant();
-        if (!SupportedProviders.Contains(providerName))
+        if (!IsSupported(providerName))
             return BadRequest(new ErrorResponse("bad_request",
-                $"Unsupported provider. Supported: {string.Join(", ", SupportedProviders)}", 400));
+                $"Unsupported provider. Supported: {string.Join(", ", _providerFactory.SupportedProviders)}", 400));
 
         var userId = GetCurrentUserId();
         var existing = await _db.UserAiProviders

@@ -122,7 +122,10 @@ builder.Services.AddScoped<UserAiKeyService>();
 
 // LLM providers for AI essence generation. OpenAI-compatible providers are
 // registrations of one parameterized class; adding another gateway is one line.
-builder.Services.AddHttpClient("llm");
+// Explicit timeout (#21): a hung upstream must fail deterministically, not sit on
+// HttpClient's implicit 100s. The providers turn the resulting TaskCanceledException
+// into a failed LlmCompletionResult (not a crash) as long as the caller didn't cancel.
+builder.Services.AddHttpClient("llm", c => c.Timeout = TimeSpan.FromSeconds(120));
 builder.Services.AddSingleton<ILlmProviderFactory>(sp =>
 {
     var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
