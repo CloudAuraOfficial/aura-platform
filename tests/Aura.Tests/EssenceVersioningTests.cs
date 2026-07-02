@@ -1,4 +1,5 @@
 using Aura.Core.Entities;
+using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
@@ -7,12 +8,22 @@ namespace Aura.Tests;
 
 public class EssenceVersioningTests
 {
+    private sealed record FakeTenant(Guid TenantId) : ITenantContext;
+
     private static AuraDbContext CreateInMemoryDb()
     {
         var options = new DbContextOptionsBuilder<AuraDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         return new AuraDbContext(options);
+    }
+
+    private static AuraDbContext CreateInMemoryDb(string dbName, Guid tenantId)
+    {
+        var options = new DbContextOptionsBuilder<AuraDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+        return new AuraDbContext(options, new FakeTenant(tenantId));
     }
 
     [Fact]
@@ -89,5 +100,48 @@ public class EssenceVersioningTests
         Assert.Equal(3, versions.Count);
         Assert.Equal(3, versions[0].VersionNumber);
         Assert.Equal(1, versions[2].VersionNumber);
+    }
+
+    // Regression for the essence-version cross-tenant IDOR: GetVersion/DiffVersions must gate
+    // on the tenant-filtered Essences set, because EssenceVersions itself has no tenant filter.
+    [Fact]
+    public async Task EssenceVersion_ParentEssence_HiddenFromOtherTenant_ButVersionRowIsUnfiltered()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+
+        Guid essenceId;
+        using (var seed = CreateInMemoryDb(dbName, tenantA))
+        {
+            var essence = new Essence
+            {
+                TenantId = tenantA,
+                Name = "SecretInfra",
+                CloudAccountId = Guid.NewGuid(),
+                EssenceJson = """{"layers":{}}""",
+                CurrentVersion = 1
+            };
+            seed.Essences.Add(essence);
+            seed.EssenceVersions.Add(new EssenceVersion
+            {
+                EssenceId = essence.Id,
+                VersionNumber = 1,
+                EssenceJson = """{"secret":"tenantA"}""",
+                ChangedByUserId = Guid.NewGuid()
+            });
+            await seed.SaveChangesAsync();
+            essenceId = essence.Id;
+        }
+
+        // A context scoped to tenant B must NOT see tenant A's essence (this is the guard).
+        using var asB = CreateInMemoryDb(dbName, tenantB);
+        Assert.False(await asB.Essences.AnyAsync(e => e.Id == essenceId));
+
+        // The version row itself is unfiltered — proving the parent-gate is load-bearing:
+        // without it, tenant B could read tenant A's version JSON directly.
+        var leaked = await asB.EssenceVersions
+            .FirstOrDefaultAsync(v => v.EssenceId == essenceId && v.VersionNumber == 1);
+        Assert.NotNull(leaked);
     }
 }

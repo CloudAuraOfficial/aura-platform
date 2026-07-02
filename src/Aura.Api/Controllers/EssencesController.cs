@@ -155,6 +155,11 @@ public class EssencesController : ControllerBase
     [HttpGet("{id:guid}/versions/{versionNumber:int}")]
     public async Task<IActionResult> GetVersion(Guid id, int versionNumber)
     {
+        // EssenceVersion has no tenant query filter; gate on the tenant-filtered parent
+        // so a caller can't read another tenant's version by GUID.
+        if (!await _db.Essences.AnyAsync(e => e.Id == id))
+            return NotFound(new ErrorResponse("not_found", "Essence not found.", 404));
+
         var version = await _db.EssenceVersions
             .FirstOrDefaultAsync(v => v.EssenceId == id && v.VersionNumber == versionNumber);
 
@@ -169,6 +174,9 @@ public class EssencesController : ControllerBase
     [HttpGet("{id:guid}/versions/{v1:int}/diff/{v2:int}")]
     public async Task<IActionResult> DiffVersions(Guid id, int v1, int v2)
     {
+        if (!await _db.Essences.AnyAsync(e => e.Id == id))
+            return NotFound(new ErrorResponse("not_found", "Essence not found.", 404));
+
         var version1 = await _db.EssenceVersions
             .FirstOrDefaultAsync(v => v.EssenceId == id && v.VersionNumber == v1);
         var version2 = await _db.EssenceVersions
