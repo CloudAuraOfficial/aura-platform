@@ -120,16 +120,27 @@ builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimatorFactory, A
 builder.Services.AddScoped<IExperimentService, ExperimentService>();
 builder.Services.AddScoped<UserAiKeyService>();
 
-// LLM providers for AI essence generation
+// LLM providers for AI essence generation. OpenAI-compatible providers are
+// registrations of one parameterized class; adding another gateway is one line.
 builder.Services.AddHttpClient("llm");
 builder.Services.AddSingleton<ILlmProviderFactory>(sp =>
 {
     var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
+
+    // Accepts both URL conventions: a path-less prefix (OpenAI-SDK "base URL"
+    // convention) or the full /chat/completions endpoint.
+    var openRouterUrl = Environment.GetEnvironmentVariable("OPENROUTER_BASE_URL")
+        ?? "https://openrouter.ai/api/v1/chat/completions";
+    if (!openRouterUrl.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
+        openRouterUrl = openRouterUrl.TrimEnd('/') + "/chat/completions";
+
     var providers = new ILlmProvider[]
     {
-        new OpenAiLlmProvider(httpFactory.CreateClient("llm")),
+        new OpenAiCompatibleLlmProvider(httpFactory.CreateClient("llm"),
+            "openai", "https://api.openai.com/v1/chat/completions", "gpt-4o"),
         new AnthropicLlmProvider(httpFactory.CreateClient("llm")),
-        new OpenRouterLlmProvider(httpFactory.CreateClient("llm"))
+        new OpenAiCompatibleLlmProvider(httpFactory.CreateClient("llm"),
+            "openrouter", openRouterUrl, "openai/gpt-4o") // OpenRouter ids are namespaced vendor/model
     };
     return new LlmProviderFactory(providers);
 });
