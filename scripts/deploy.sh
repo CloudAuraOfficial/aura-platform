@@ -32,6 +32,20 @@ sleep 5
 if curl -sf http://127.0.0.1:8006/health > /dev/null 2>&1; then
     DEPLOYED_SHA=$(git rev-parse HEAD)
     echo "$DEPLOYED_SHA" > "$DEPLOYED_SHA_FILE"
+    # Tag the just-built images with the git SHA so rollback.sh can swap back to a
+    # previous known-good image instantly (no rebuild). Keep the last 3 SHA tags per
+    # service; prune older. Local-only — ghcr off-box push is a later enhancement
+    # (needs a PAT with write:packages). ponytail: local tags cover single-VPS rollback.
+    for svc in aura_api aura_worker; do
+        img="aura-platform-${svc}"
+        if docker image inspect "$img:latest" >/dev/null 2>&1; then
+            docker tag "$img:latest" "$img:$DEPLOYED_SHA" 2>/dev/null || true
+            # keep newest 3 sha tags (exclude :latest), remove the rest
+            docker images "$img" --format '{{.CreatedAt}}\t{{.Tag}}' \
+                | grep -vP '\tlatest$' | sort -r | tail -n +4 | cut -f2 \
+                | while read -r old; do docker rmi "$img:$old" 2>/dev/null || true; done
+        fi
+    done
     echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Deploy succeeded — health check passed (sha=$DEPLOYED_SHA)" | tee -a "$LOG_FILE"
 else
     echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') Deploy WARNING — health check failed" | tee -a "$LOG_FILE"
