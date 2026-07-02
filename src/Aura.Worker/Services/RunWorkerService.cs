@@ -166,10 +166,22 @@ public class RunWorkerService : BackgroundService
         activity?.SetTag("deployment.id", run.DeploymentId.ToString());
         activity?.SetTag("deployment.layer_count", run.Layers.Count);
 
-        // Claim the run
+        // Claim the run atomically. The xmin concurrency token makes the
+        // Queued->Running transition a compare-and-swap: if a second worker
+        // replica claimed this run between our re-read and here, SaveChanges
+        // updates 0 rows and throws — we skip rather than double-execute the
+        // run's non-idempotent cloud create/delete ops.
         run.Status = RunStatus.Running;
         run.StartedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            _logger.LogInformation("Run {RunId} already claimed by another worker; skipping", runId);
+            return;
+        }
         var runStopwatch = Stopwatch.StartNew();
 
         _logger.LogInformation("Processing run {RunId} with {LayerCount} layers", runId, run.Layers.Count);

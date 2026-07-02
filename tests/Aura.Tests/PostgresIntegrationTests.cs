@@ -290,6 +290,67 @@ public class PostgresIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task ConcurrentRunClaim_OnlyOneWorkerWins()
+    {
+        // Two worker replicas re-read the same Queued run and both try to claim
+        // it (Queued->Running). The xmin concurrency token must let exactly one
+        // win; the loser gets DbUpdateConcurrencyException (which the worker
+        // catches and skips), preventing double-execution of cloud ops.
+        var tenantId = Guid.NewGuid();
+        Guid runId;
+        using (var seed = CreateDb())
+        {
+            seed.Tenants.Add(new Tenant { Id = tenantId, Name = "Claim", Slug = "claim-race" });
+            var account = new CloudAccount
+            {
+                TenantId = tenantId, Provider = CloudProvider.Azure,
+                Label = "Test", EncryptedCredentials = "enc"
+            };
+            seed.CloudAccounts.Add(account);
+            await seed.SaveChangesAsync();
+            var essence = new Essence
+            {
+                TenantId = tenantId, Name = "E", CloudAccountId = account.Id,
+                EssenceJson = "{}", CurrentVersion = 1
+            };
+            seed.Essences.Add(essence);
+            await seed.SaveChangesAsync();
+            var deployment = new Deployment
+            { TenantId = tenantId, EssenceId = essence.Id, Name = "D", IsEnabled = true };
+            seed.Deployments.Add(deployment);
+            await seed.SaveChangesAsync();
+
+            var run = new DeploymentRun
+            {
+                TenantId = tenantId, DeploymentId = deployment.Id,
+                Status = RunStatus.Queued, SnapshotJson = "{}"
+            };
+            seed.DeploymentRuns.Add(run);
+            await seed.SaveChangesAsync();
+            runId = run.Id;
+        }
+
+        // Each "worker" loads the run in its own context (own xmin snapshot).
+        using var workerA = CreateDb();
+        using var workerB = CreateDb();
+        var runA = await workerA.DeploymentRuns.IgnoreQueryFilters().FirstAsync(r => r.Id == runId);
+        var runB = await workerB.DeploymentRuns.IgnoreQueryFilters().FirstAsync(r => r.Id == runId);
+
+        runA.Status = RunStatus.Running;
+        runA.StartedAt = DateTime.UtcNow;
+        await workerA.SaveChangesAsync(); // A wins, bumps xmin
+
+        runB.Status = RunStatus.Running;
+        runB.StartedAt = DateTime.UtcNow;
+        // B's xmin is now stale -> update hits 0 rows -> concurrency exception.
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => workerB.SaveChangesAsync());
+
+        using var verify = CreateDb();
+        var final = await verify.DeploymentRuns.IgnoreQueryFilters().FirstAsync(r => r.Id == runId);
+        Assert.Equal(RunStatus.Running, final.Status);
+    }
+
+    [Fact]
     public async Task InviteToken_UniqueIndex()
     {
         using var db = CreateDb();
