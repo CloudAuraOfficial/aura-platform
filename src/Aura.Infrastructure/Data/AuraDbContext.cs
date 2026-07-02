@@ -78,6 +78,12 @@ public class AuraDbContext : DbContext
             b.Property(r => r.SnapshotJson).HasColumnType("jsonb");
             b.Property(r => r.Status).HasConversion<string>();
             b.Property(r => r.EstimatedCostUsd).HasPrecision(18, 4);
+            // Optimistic concurrency for the Queued->Running claim so two worker
+            // replicas can't both claim the same run and double-execute cloud ops.
+            // Postgres xmin = no schema column, no data migration.
+#pragma warning disable CS0618 // xmin is advisory-obsolete but the intended zero-migration token here
+            b.UseXminAsConcurrencyToken();
+#pragma warning restore CS0618
         });
 
         // AuditLogEntry
