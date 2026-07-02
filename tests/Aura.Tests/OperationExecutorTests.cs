@@ -23,6 +23,45 @@ public class OperationExecutorTests
         }
     }
 
+    // Hangs until its token is cancelled — stands in for a stuck cloud SDK call.
+    private class HangingHandler : IOperationHandler
+    {
+        public async Task<LayerExecutionResult> ExecuteAsync(
+            string layerName, JsonElement parameters, Dictionary<string, string> envVars, CancellationToken ct)
+        {
+            await Task.Delay(Timeout.Infinite, ct);
+            return new LayerExecutionResult(true, "should never reach here");
+        }
+    }
+
+    // #16: a hung operation must fail fast at the client-side ceiling, not block forever.
+    [Fact]
+    public async Task ExecuteAsync_Times_Out_A_Hung_Operation()
+    {
+        var registry = new OperationRegistry();
+        registry.Register<HangingHandler>("CreateVNet");
+
+        var sp = new Mock<IServiceProvider>();
+        sp.Setup(s => s.GetService(typeof(HangingHandler))).Returns(new HangingHandler());
+
+        var executor = new OperationExecutor(
+            sp.Object, registry, Mock.Of<ILogger<OperationExecutor>>(),
+            operationTimeout: TimeSpan.FromMilliseconds(200));
+
+        var layer = new DeploymentLayer
+        {
+            LayerName = "TestLayer",
+            ExecutorType = ExecutorType.Operation,
+            OperationType = "CreateVNet",
+            Parameters = "{}"
+        };
+
+        var result = await executor.ExecuteAsync(layer, "/tmp", new(), CancellationToken.None);
+
+        Assert.False(result.Success);
+        Assert.Contains("timed out", result.Output);
+    }
+
     [Fact]
     public async Task ExecuteAsync_Dispatches_To_Correct_Handler()
     {
