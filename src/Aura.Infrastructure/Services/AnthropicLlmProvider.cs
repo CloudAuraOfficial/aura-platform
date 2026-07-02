@@ -4,6 +4,10 @@ using Aura.Core.Interfaces;
 
 namespace Aura.Infrastructure.Services;
 
+// Anthropic's /v1/messages API — not OpenAI-compatible, so it keeps its own
+// class. Same contract as OpenAiCompatibleLlmProvider: GenerateAsync never
+// throws for provider-side problems; only caller-initiated cancellation
+// propagates.
 public class AnthropicLlmProvider : ILlmProvider
 {
     private readonly HttpClient _http;
@@ -20,6 +24,7 @@ public class AnthropicLlmProvider : ILlmProvider
     public async Task<LlmCompletionResult> GenerateAsync(LlmRequest request, CancellationToken ct = default)
     {
         var model = request.Model ?? DefaultModel;
+        LlmCompletionResult Fail(string error) => new("", 0, 0, model, false, error);
 
         var payload = new
         {
@@ -34,37 +39,68 @@ public class AnthropicLlmProvider : ILlmProvider
 
         var json = JsonSerializer.Serialize(payload);
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
-        httpRequest.Headers.Add("x-api-key", request.ApiKey);
+        try
+        {
+            httpRequest.Headers.Add("x-api-key", request.ApiKey.Trim());
+        }
+        catch (FormatException)
+        {
+            return Fail("anthropic: stored API key contains characters invalid in a header — re-enter the key");
+        }
         httpRequest.Headers.Add("anthropic-version", "2023-06-01");
         httpRequest.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        using var response = await _http.SendAsync(httpRequest, ct);
-        var body = await response.Content.ReadAsStringAsync(ct);
-
-        if (!response.IsSuccessStatusCode)
+        string body;
+        try
         {
-            return new LlmCompletionResult("", 0, 0, model, false,
-                $"Anthropic API error {(int)response.StatusCode}: {TruncateError(body)}");
+            using var response = await _http.SendAsync(httpRequest, ct);
+            body = await response.Content.ReadAsStringAsync(ct);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return Fail($"Anthropic API error {(int)response.StatusCode}: {TruncateError(body)}");
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException
+            || (ex is TaskCanceledException && !ct.IsCancellationRequested))
+        {
+            return Fail($"Anthropic request failed: {ex.Message}");
         }
 
-        using var doc = JsonDocument.Parse(body);
-        var root = doc.RootElement;
-
-        var content = "";
-        if (root.TryGetProperty("content", out var contentArr) && contentArr.GetArrayLength() > 0)
+        try
         {
-            content = contentArr[0].GetProperty("text").GetString() ?? "";
-        }
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
 
-        var inputTokens = 0;
-        var outputTokens = 0;
-        if (root.TryGetProperty("usage", out var usage))
+            if (!root.TryGetProperty("content", out var contentArr)
+                || contentArr.ValueKind != JsonValueKind.Array
+                || contentArr.GetArrayLength() == 0)
+            {
+                return Fail($"Anthropic returned no content: {TruncateError(body)}");
+            }
+
+            var content = contentArr[0].GetProperty("text").GetString();
+            if (string.IsNullOrEmpty(content))
+            {
+                return Fail($"Anthropic returned an empty completion: {TruncateError(body)}");
+            }
+
+            var inputTokens = 0;
+            var outputTokens = 0;
+            if (root.TryGetProperty("usage", out var usage) && usage.ValueKind == JsonValueKind.Object)
+            {
+                if (usage.TryGetProperty("input_tokens", out var it) && it.ValueKind == JsonValueKind.Number)
+                    inputTokens = it.GetInt32();
+                if (usage.TryGetProperty("output_tokens", out var ot) && ot.ValueKind == JsonValueKind.Number)
+                    outputTokens = ot.GetInt32();
+            }
+
+            return new LlmCompletionResult(content, inputTokens, outputTokens, model, true);
+        }
+        catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException)
         {
-            inputTokens = usage.GetProperty("input_tokens").GetInt32();
-            outputTokens = usage.GetProperty("output_tokens").GetInt32();
+            return Fail($"Anthropic returned an unparseable response: {TruncateError(body)}");
         }
-
-        return new LlmCompletionResult(content, inputTokens, outputTokens, model, true);
     }
 
     private static string TruncateError(string body) =>
