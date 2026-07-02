@@ -229,11 +229,8 @@ public class AiEssenceBuilderService
 
         sw.Stop();
 
-        if (essenceJson is null)
-            throw new InvalidOperationException(
-                $"Failed to generate valid essence JSON after {iterations} attempts. Last error: {lastError}");
-
-        // Log usage
+        // Log usage for BOTH outcomes — tokens burned in failed iterations are paid
+        // usage and must be recorded, not lost when we throw (#21).
         var log = new AiGenerationLog
         {
             TenantId = tenantId,
@@ -245,10 +242,14 @@ public class AiEssenceBuilderService
             OutputTokens = totalOutputTokens,
             Iterations = iterations,
             DurationMs = sw.ElapsedMilliseconds,
-            Success = true
+            Success = essenceJson is not null
         };
         _db.Set<AiGenerationLog>().Add(log);
         await _db.SaveChangesAsync(ct);
+
+        if (essenceJson is null)
+            throw new InvalidOperationException(
+                $"Failed to generate valid essence JSON after {iterations} attempts. Last error: {lastError}");
 
         _logger.LogInformation(
             "AI essence generated: provider={Provider}, model={Model}, tokens={In}+{Out}, iterations={Iter}, duration={Ms}ms",
