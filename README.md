@@ -202,6 +202,8 @@ dotnet test tests/Aura.Infrastructure.Tests
 
 The test suite uses Testcontainers for integration tests against real PostgreSQL and Redis instances.
 
+Real-cloud create/teardown tests are **env-gated** and skipped by default (they cost money): set `AWS_INTEGRATION=1` / `GCP_INTEGRATION=1` with valid credentials to run `AwsIntegrationTests` / `GcpIntegrationTests`. Browser end-to-end specs live in `e2e/` (Playwright: auth, dashboard, experiments API, health) — `cd e2e && npm ci && npx playwright test`.
+
 ## Monitoring
 
 - **Health check**: `GET /health` returns `{"status": "healthy", "timestamp": "..."}`.
