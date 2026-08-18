@@ -144,7 +144,6 @@ This starts four containers:
 | `GET` | `/api/v1/audit-log` | Query audit log entries | JWT (Admin) |
 | `GET` | `/api/v1/deployments/{id}/runs/{runId}/logs/stream` | SSE real-time log stream via Redis pub/sub | JWT |
 | `GET` | `/health` | Health check | None |
-| `POST` | `/api/internal/deploy` | CI/CD webhook (triggers git pull + rebuild) | Bearer token |
 
 ## Tech Stack
 
@@ -160,8 +159,8 @@ This starts four containers:
 | Rate Limiting | ASP.NET Core built-in (fixed window: 100 req/min global, 10 req/min auth) |
 | Worker | Background services (FIFO deployment queue, cron scheduler, stuck-run reaper) |
 | Executors | PowerShell, Python, C# SDK (layer execution dispatch) |
-| Testing | xUnit + Moq + Testcontainers (130 tests) |
-| CI/CD | GitHub Actions (build + test, webhook deploy, smoke test) |
+| Testing | xUnit + Moq + Testcontainers (240 tests) + Playwright e2e |
+| CI/CD | GitHub Actions (build + test); deploy via host-side SHA watcher (`scripts/deploy.sh`, `rollback.sh`) |
 
 ## Configuration
 
@@ -185,13 +184,12 @@ All configuration is via environment variables (`.env` file).
 | `RUN_STALE_THRESHOLD_SECONDS` | Stuck-run reaper timeout | No | `7200` |
 | `SCHEDULER_POLL_SECONDS` | Cron scheduler poll interval | No | `30` |
 | `CORS_ORIGINS` | Comma-separated allowed origins | No | any |
-| `DEPLOY_WEBHOOK_SECRET` | Bearer token for CI/CD deploy webhook | No | -- |
 | `ASPNETCORE_ENVIRONMENT` | Runtime environment | No | `Production` |
 
 ## Testing
 
 ```bash
-# Run all tests (130 tests)
+# Run all tests (240 tests)
 dotnet test
 
 # Run with verbosity
@@ -210,7 +208,7 @@ The test suite uses Testcontainers for integration tests against real PostgreSQL
 - **Prometheus metrics**: Exposed via prometheus-net at the standard `/metrics` endpoint.
 - **Real-time logs**: `GET /api/v1/deployments/{id}/runs/{runId}/logs/stream` provides Server-Sent Events for live deployment log output via Redis pub/sub.
 - **Audit log**: All write operations are recorded in the audit log, queryable via `GET /api/v1/audit-log`.
-- **CI/CD**: GitHub Actions runs build + test on every push, then triggers a deploy webhook for automatic VPS deployment.
+- **CI/CD**: GitHub Actions runs build + test on every push; deployment is pulled by a host-side cron watcher that compares the deployed SHA to `main` and runs `scripts/deploy.sh` (SHA-tagged images, `rollback.sh` to revert). No inbound deploy endpoint.
 
 ## Project Structure
 
