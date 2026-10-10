@@ -86,16 +86,37 @@ public class EssenceGenerationE2ETests
     private static Func<HttpResponseMessage> HttpError(HttpStatusCode status, string body) => () =>
         new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
+    // Records formatted log lines so tests can check that details reach the log, not the client.
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter) => Messages.Add(formatter(state, exception));
+    }
+
     private sealed class Harness
     {
         public required AuraDbContext Db { get; init; }
         public required AiEssenceBuilderService Service { get; init; }
         public required ScriptedTransport Transport { get; init; }
+        public required CapturingLogger<AiEssenceBuilderService> Logger { get; init; }
         public required Guid UserId { get; init; }
         public required Guid CloudAccountId { get; init; }
     }
 
     private static Harness CreateHarness(bool hasKey, params Func<HttpResponseMessage>[] steps)
+    {
+        var transport = new ScriptedTransport(steps);
+        var provider = new OpenAiCompatibleLlmProvider(new HttpClient(transport), "openai", FakeApiUrl, "fake-model");
+        return CreateHarnessWithProvider(hasKey, provider, transport);
+    }
+
+    private static Harness CreateHarnessWithProvider(bool hasKey, ILlmProvider provider, ScriptedTransport transport)
     {
         var db = new AuraDbContext(new DbContextOptionsBuilder<AuraDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
@@ -121,17 +142,17 @@ public class EssenceGenerationE2ETests
         var crypto = new Mock<ICryptoService>();
         crypto.Setup(c => c.Decrypt(It.IsAny<string>())).Returns<string>(s => s);
 
-        var transport = new ScriptedTransport(steps);
-        var provider = new OpenAiCompatibleLlmProvider(new HttpClient(transport), "openai", FakeApiUrl, "fake-model");
+        var logger = new CapturingLogger<AiEssenceBuilderService>();
         var service = new AiEssenceBuilderService(
             new LlmProviderFactory(new ILlmProvider[] { provider }),
             new UserAiKeyService(db, crypto.Object),
             db,
-            Mock.Of<ILogger<AiEssenceBuilderService>>());
+            logger);
 
         return new Harness
         {
-            Db = db, Service = service, Transport = transport, UserId = userId, CloudAccountId = cloudAccountId
+            Db = db, Service = service, Transport = transport, Logger = logger,
+            UserId = userId, CloudAccountId = cloudAccountId
         };
     }
 
@@ -248,6 +269,7 @@ public class EssenceGenerationE2ETests
         new object[] { "{\"layers\":{\"a\":{\"isEnabled\":false,\"operationType\":\"CreateResourceGroup\"}}}", "no enabled layers" },
         new object[] { CyclicEssence, "Cycle detected" },
         new object[] { "{\"layers\":{\"a\":{\"isEnabled\":true,\"operationType\":\"CreateResourceGroup\",\"runPolicy\":\"sometimes\"}}}", "unknown runPolicy" },
+        new object[] { "{\"layers\":{\"a\":{\"isEnabled\":true,\"operationType\":\"CreateResourceGroup\",\"runPolicy\":\"7\"}}}", "unknown runPolicy" },
     };
 
     [Theory]
@@ -258,9 +280,9 @@ public class EssenceGenerationE2ETests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Generate(h));
 
-        Assert.Contains("Failed to generate valid essence JSON after 3 attempts", ex.Message);
+        Assert.Equal("The model returned an invalid essence after 3 attempts. Try rephrasing the prompt.", ex.Message);
         if (expectedReason.Length > 0)
-            Assert.Contains(expectedReason, ex.Message);
+            Assert.Contains(expectedReason, string.Join("\n", h.Logger.Messages));
 
         // Usage from every paid attempt is recorded, marked as failed (#21).
         var log = await h.Db.Set<AiGenerationLog>().SingleAsync();
@@ -279,12 +301,65 @@ public class EssenceGenerationE2ETests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Generate(h));
 
-        Assert.Contains("LLM provider error", ex.Message);
+        Assert.Equal("The AI provider returned HTTP 500. Try again later.", ex.Message);
         var log = await h.Db.Set<AiGenerationLog>().SingleAsync();
         Assert.False(log.Success);
         Assert.Equal(2, log.Iterations);
         Assert.Equal(10, log.InputTokens);   // the failed call reported no usage
         Assert.Equal(5, log.OutputTokens);
+    }
+
+    [Fact]
+    public async Task Usage_is_logged_when_the_client_disconnects_mid_retry()
+    {
+        // The second provider call is aborted by the request's own token, as on a client disconnect.
+        using var cts = new CancellationTokenSource();
+        var h = CreateHarness(hasKey: true, Reply("not json"), () =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            h.Service.GenerateAsync(h.UserId, Request(h.CloudAccountId), Guid.Empty, cts.Token));
+
+        var log = await h.Db.Set<AiGenerationLog>().SingleAsync();
+        Assert.False(log.Success);
+        Assert.Equal(2, log.Iterations);
+        Assert.Equal(10, log.InputTokens);   // only the first call reported usage
+        Assert.Equal(5, log.OutputTokens);
+    }
+
+    [Fact]
+    public async Task Usage_is_logged_when_an_unexpected_exception_escapes_a_provider_call()
+    {
+        // Not an HTTP or cancellation failure, so the provider does not handle it; it escapes the loop.
+        var provider = new Mock<ILlmProvider>();
+        provider.Setup(p => p.ProviderName).Returns("openai");
+        provider.SetupSequence(p => p.GenerateAsync(It.IsAny<LlmRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new LlmCompletionResult("not json", 10, 5, "fake-model", true))
+            .ThrowsAsync(new InvalidCastException("simulated provider bug"));
+        var h = CreateHarnessWithProvider(hasKey: true, provider.Object, new ScriptedTransport(Array.Empty<Func<HttpResponseMessage>>()));
+
+        await Assert.ThrowsAsync<InvalidCastException>(() => Generate(h));
+
+        var log = await h.Db.Set<AiGenerationLog>().SingleAsync();
+        Assert.False(log.Success);
+        Assert.Equal(2, log.Iterations);
+        Assert.Equal(10, log.InputTokens);
+        Assert.Equal(5, log.OutputTokens);
+    }
+
+    [Fact]
+    public void Unexpected_parser_exception_is_reported_as_invalid_output_not_thrown()
+    {
+        // ParseAndSortLayers only throws the types it documents today. Whatever a parser throws,
+        // the retry loop must see a rejection, so nothing escapes ValidateEssenceJson.
+        var reason = AiEssenceBuilderService.ValidateEssenceJson(
+            ValidEssence, _ => throw new NullReferenceException("simulated parser bug"));
+
+        Assert.NotNull(reason);
+        Assert.Contains("simulated parser bug", reason);
     }
 
     // ---- (d) provider timeout / HTTP error ----
@@ -298,7 +373,7 @@ public class EssenceGenerationE2ETests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Generate(h));
 
-        Assert.StartsWith("LLM provider error: openai request failed", ex.Message);
+        Assert.Equal("The AI provider request failed. Try again.", ex.Message);
         Assert.Equal(1, h.Transport.CallCount);
         var log = await h.Db.Set<AiGenerationLog>().SingleAsync();
         Assert.False(log.Success);
@@ -312,7 +387,8 @@ public class EssenceGenerationE2ETests
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Generate(h));
 
-        Assert.Contains("API error 401", ex.Message);
+        Assert.Equal("The AI provider rejected the API key. Check the key in Account Settings.", ex.Message);
+        Assert.DoesNotContain("invalid key", ex.Message);  // the upstream body stays in the log
         Assert.Equal(1, h.Transport.CallCount);
         Assert.Empty(h.Db.Essences);
     }
@@ -399,7 +475,7 @@ public class EssenceGenerationE2ETests
             new GenerateEssenceRequest("Deploy a VM", h.CloudAccountId, "openai")));
 
         Assert.Equal(422, status);
-        Assert.Contains("request failed", error.Message);
+        Assert.Equal("The AI provider request failed. Try again.", error.Message);
     }
 
     [Fact]
@@ -445,13 +521,62 @@ public class EssenceGenerationE2ETests
     }
 
     [Fact]
-    public void Model_validation_failure_without_message_falls_back_to_generic_text()
+    public void Model_validation_failure_without_message_names_the_field()
     {
         var actionContext = new ActionContext(new DefaultHttpContext(), new RouteData(), new ActionDescriptor());
-        actionContext.ModelState.AddModelError("body", "   ");
+        actionContext.ModelState.AddModelError("Provider", "   ");
 
         var result = Assert.IsType<BadRequestObjectResult>(InvalidModelStateResponse.Create(actionContext));
 
-        Assert.Equal("Request is invalid.", Assert.IsType<ErrorResponse>(result.Value).Message);
+        Assert.Equal("'Provider' has an invalid value.", Assert.IsType<ErrorResponse>(result.Value).Message);
+    }
+
+    // The JSON input formatter records a conversion failure as text, as it does here.
+    [Fact]
+    public void Deserializer_text_failure_names_the_field_and_drops_framework_internals()
+    {
+        var actionContext = new ActionContext(new DefaultHttpContext(), new RouteData(), new ActionDescriptor());
+        actionContext.ModelState.TryAddModelError("CloudAccountId",
+            "The JSON value could not be converted to System.Guid. Path: $.cloudAccountId | LineNumber: 0 | BytePositionInLine: 45.");
+
+        var result = Assert.IsType<BadRequestObjectResult>(InvalidModelStateResponse.Create(actionContext));
+
+        var message = Assert.IsType<ErrorResponse>(result.Value).Message;
+        Assert.Equal("'CloudAccountId' has an invalid value.", message);
+        Assert.DoesNotContain("System.", message);
+        Assert.DoesNotContain("BytePosition", message);
+    }
+
+    [Fact]
+    public void Deserializer_exception_failure_names_the_field_and_drops_framework_internals()
+    {
+        var actionContext = new ActionContext(new DefaultHttpContext(), new RouteData(), new ActionDescriptor());
+        actionContext.ModelState.TryAddModelException("CloudAccountId", new JsonException("'x' is an invalid start of a value."));
+
+        var result = Assert.IsType<BadRequestObjectResult>(InvalidModelStateResponse.Create(actionContext));
+
+        Assert.Equal("'CloudAccountId' has an invalid value.", Assert.IsType<ErrorResponse>(result.Value).Message);
+    }
+
+    [Fact]
+    public void Model_validation_choice_is_deterministic_and_prefers_field_errors()
+    {
+        // ModelState is a dictionary: the same errors must always yield the same message, and a
+        // body-level error must not hide a field-specific one.
+        ActionContext Build()
+        {
+            var context = new ActionContext(new DefaultHttpContext(), new RouteData(), new ActionDescriptor());
+            context.ModelState.AddModelError("request", "The request field is required.");
+            context.ModelState.AddModelError("Provider", "The Provider field is required.");
+            context.ModelState.AddModelError("Prompt", "The Prompt field is required.");
+            return context;
+        }
+
+        for (var i = 0; i < 5; i++)
+        {
+            var message = Assert.IsType<ErrorResponse>(
+                Assert.IsType<BadRequestObjectResult>(InvalidModelStateResponse.Create(Build())).Value).Message;
+            Assert.Equal("The Prompt field is required.", message);
+        }
     }
 }
