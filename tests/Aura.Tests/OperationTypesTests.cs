@@ -1,7 +1,9 @@
 using System.Text.RegularExpressions;
 using Aura.Api.Services;
+using Aura.Core.Enums;
 using Aura.Core.Operations;
 using Aura.Worker.Operations;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Aura.Tests;
@@ -48,7 +50,7 @@ public class OperationTypesTests
     [Fact]
     public void Worker_registry_registers_exactly_the_shared_operation_types()
     {
-        var registered = OperationRegistry.CreateDefault().RegisteredOperationTypes;
+        var registered = OperationRegistry.CreateDefault(new ServiceCollection()).RegisteredOperationTypes;
 
         var missingHandler = OperationTypes.All.Except(registered, StringComparer.OrdinalIgnoreCase).ToList();
         var missingFromList = registered.Except(OperationTypes.All, StringComparer.OrdinalIgnoreCase).ToList();
@@ -56,6 +58,59 @@ public class OperationTypesTests
         Assert.Empty(missingHandler);
         Assert.Empty(missingFromList);
         Assert.Equal(OperationTypes.All.Count, registered.Count);
+    }
+
+    // The handler registration and the DI registration come from one call, so each registered type
+    // must also be a transient service. A handler added to one but not the other would fail here.
+    [Fact]
+    public void Worker_di_registers_a_handler_for_every_operation_type()
+    {
+        var services = new ServiceCollection();
+        OperationRegistry.CreateDefault(services);
+
+        var handlerServices = services.Count(d => d.ServiceType.IsAssignableTo(typeof(Aura.Worker.Operations.IOperationHandler)));
+        Assert.Equal(OperationTypes.All.Count, handlerServices);
+    }
+
+    [Fact]
+    public void Canonicalize_returns_the_canonical_casing_or_null()
+    {
+        Assert.Equal("CreateVM", OperationTypes.Canonicalize("createvm"));
+        Assert.Equal("HttpHealthCheck", OperationTypes.Canonicalize("HTTPHEALTHCHECK"));
+        Assert.Null(OperationTypes.Canonicalize("Nope"));
+        Assert.Null(OperationTypes.Canonicalize(null));
+    }
+
+    [Fact]
+    public void Every_cloud_list_is_a_subset_of_All_and_together_they_cover_it()
+    {
+        var union = OperationTypes.ForCloud(CloudProvider.Azure)
+            .Union(OperationTypes.ForCloud(CloudProvider.Aws))
+            .Union(OperationTypes.ForCloud(CloudProvider.Gcp))
+            .ToList();
+
+        Assert.Empty(union.Except(OperationTypes.All));
+        Assert.Empty(OperationTypes.All.Except(union));
+    }
+
+    [Fact]
+    public void Cloud_lists_do_not_offer_another_clouds_handler_types()
+    {
+        Assert.DoesNotContain("CreateEc2Instance", OperationTypes.ForCloud(CloudProvider.Azure));
+        Assert.DoesNotContain("CreateVM", OperationTypes.ForCloud(CloudProvider.Aws));
+        Assert.DoesNotContain("CreateNetwork", OperationTypes.ForCloud(CloudProvider.Azure));
+        Assert.Contains("HttpHealthCheck", OperationTypes.ForCloud(CloudProvider.Gcp));
+    }
+
+    [Fact]
+    public void Emissionload_entrypoint_types_are_known_and_only_azure_runs_any()
+    {
+        Assert.Empty(OperationTypes.EmissionLoadEntrypoint(CloudProvider.Aws));
+        Assert.Empty(OperationTypes.EmissionLoadEntrypoint(CloudProvider.Gcp));
+
+        var azure = OperationTypes.EmissionLoadEntrypoint(CloudProvider.Azure);
+        Assert.NotEmpty(azure);
+        Assert.Empty(azure.Except(OperationTypes.ForCloud(CloudProvider.Azure)));
     }
 
     // The system prompts tell the model which types to use. Each type they name must be one the
