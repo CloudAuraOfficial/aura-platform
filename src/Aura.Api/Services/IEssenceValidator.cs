@@ -1,21 +1,29 @@
+using Aura.Core.Enums;
+
 namespace Aura.Api.Services;
 
 /// <summary>
-/// Checks essence JSON against what the platform can run. Generation uses the full check;
-/// the essence endpoints use the operation-type check when they store JSON.
+/// The outcome of checking essence JSON: the JSON to store (operation-type names in canonical casing)
+/// and, when the essence is rejected, a short reason that is safe to show the user or feed back to a model.
+/// </summary>
+public sealed record EssenceCheck(string EssenceJson, string? Error);
+
+/// <summary>
+/// Checks essence JSON against what the platform can run. Only operation and emissionload layers are
+/// checked; script layers may carry parameters.operationType as a plain argument.
 /// </summary>
 public interface IEssenceValidator
 {
     /// <summary>
-    /// Full check: JSON shape, the deployment parser, and operation types. Returns null when the
-    /// essence is runnable, otherwise a short reason that is safe to show the user or feed back to a model.
+    /// Generation: JSON shape, the deployment parser, and the operation types valid for <paramref name="cloud"/>.
+    /// A rejection names the layer and type and lists only that cloud's types, so a retry stays on that cloud.
     /// </summary>
-    string? Validate(string essenceJson);
+    EssenceCheck Validate(string essenceJson, CloudProvider cloud);
 
     /// <summary>
-    /// Operation-type check only. Returns null when no layer names an unknown operationType.
-    /// Layers are checked whether enabled or not, so a typo cannot hide in a disabled layer.
-    /// Input that is not a JSON object with a layers object passes; structure is not checked here.
+    /// Save, update and clone: every layer's operation type must be a known one, on any cloud. Essences may
+    /// mix clouds, because the Worker gives each layer its own cloud account and does not check that an
+    /// operation matches it. Input that is not a JSON object with a layers object passes; structure is not checked here.
     /// </summary>
-    string? ValidateOperationTypes(string essenceJson);
+    EssenceCheck CheckOperationTypes(string essenceJson);
 }

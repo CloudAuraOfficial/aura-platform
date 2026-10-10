@@ -227,10 +227,11 @@ public class AiEssenceBuilderService
                 // Try to extract JSON from the response (strip markdown fences if present)
                 var content = ExtractJson(result.Content);
 
-                lastError = _validator.Validate(content);
+                var check = _validator.Validate(content, cloudProvider);
+                lastError = check.Error;
                 if (lastError is null)
                 {
-                    essenceJson = content;
+                    essenceJson = check.EssenceJson;
                     break;
                 }
             }

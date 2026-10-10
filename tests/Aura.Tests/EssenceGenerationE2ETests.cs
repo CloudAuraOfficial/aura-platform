@@ -176,7 +176,7 @@ public class EssenceGenerationE2ETests
 
         var result = await Generate(h);
 
-        Assert.Null(new EssenceValidator().Validate(result.EssenceJson));
+        Assert.Null(new EssenceValidator().Validate(result.EssenceJson, CloudProvider.Azure).Error);
         var layers = DeploymentOrchestrationService.ParseAndSortLayers(result.EssenceJson, Guid.NewGuid());
         Assert.Equal(new[] { "create-rg", "deploy-vm", "health-check" }, layers.Select(l => l.LayerName));
         Assert.Equal(new[] { 0, 1, 2 }, layers.Select(l => l.SortOrder));
@@ -199,7 +199,7 @@ public class EssenceGenerationE2ETests
 
         var result = await Generate(h);
 
-        Assert.Null(new EssenceValidator().Validate(result.EssenceJson));
+        Assert.Null(new EssenceValidator().Validate(result.EssenceJson, CloudProvider.Azure).Error);
         Assert.StartsWith("{", result.EssenceJson);
     }
 
@@ -359,9 +359,9 @@ public class EssenceGenerationE2ETests
     public void Unexpected_parser_exception_is_reported_as_invalid_output_not_thrown()
     {
         // ParseAndSortLayers only throws the types it documents today. Whatever a parser throws,
-        // the retry loop must see a rejection, so nothing escapes ValidateEssenceJson.
+        // the retry loop must see a rejection, so nothing escapes Validate.
         var reason = new EssenceValidator().Validate(
-            ValidEssence, _ => throw new NullReferenceException("simulated parser bug"));
+            ValidEssence, CloudProvider.Azure, _ => throw new NullReferenceException("simulated parser bug")).Error;
 
         Assert.NotNull(reason);
         Assert.Contains("simulated parser bug", reason);
@@ -443,7 +443,7 @@ public class EssenceGenerationE2ETests
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var body = Assert.IsType<GenerateEssenceResponse>(ok.Value);
-        Assert.Null(new EssenceValidator().Validate(body.EssenceJson));
+        Assert.Null(new EssenceValidator().Validate(body.EssenceJson, CloudProvider.Azure).Error);
     }
 
     [Fact]
@@ -604,7 +604,7 @@ public class EssenceGenerationE2ETests
         Assert.Equal(2, h.Transport.CallCount);
         Assert.Contains("Unknown operationType", h.Transport.RequestBodies[1]);
         Assert.Contains("DeployDeploymentManager", h.Transport.RequestBodies[1]);
-        Assert.Null(new EssenceValidator().Validate(result.EssenceJson));
+        Assert.Null(new EssenceValidator().Validate(result.EssenceJson, CloudProvider.Azure).Error);
         Assert.True((await h.Db.Set<AiGenerationLog>().SingleAsync()).Success);
     }
 
@@ -689,5 +689,91 @@ public class EssenceGenerationE2ETests
         var (status, _) = AssertErrorResult(result);
         Assert.Equal(400, status);
         Assert.Single(h.Db.Essences);
+    }
+
+
+    // ---- review: cloud-scoped retry feedback, numeric and lowercase names at save, multi-cloud save ----
+
+    [Fact]
+    public async Task Generation_for_azure_rejects_an_aws_operation_and_the_retry_lists_only_azure_types()
+    {
+        var awsOperation = ValidEssence.Replace("\"HttpHealthCheck\"", "\"CreateEc2Instance\"");
+        var h = CreateHarness(hasKey: true, Reply(awsOperation), Reply(ValidEssence));
+
+        var result = await Generate(h);
+
+        Assert.Equal(2, result.Iterations);
+        // The retry's user message, decoded from the request body (the body escapes quotes).
+        var feedback = JsonDocument.Parse(h.Transport.RequestBodies[1]).RootElement
+            .GetProperty("messages")[1].GetProperty("content").GetString()!;
+        Assert.Contains("layer 'health-check' uses 'CreateEc2Instance'", feedback);
+        Assert.Contains("Not an Azure operation type", feedback);
+        // The feedback steers the retry, so it must not offer other clouds' types.
+        Assert.DoesNotContain("CreateVpc", feedback);
+        Assert.DoesNotContain("CreateGceInstance", feedback);
+        Assert.DoesNotContain("DeployCloudFormation", feedback);
+    }
+
+    [Fact]
+    public async Task Generation_stores_operation_type_names_in_canonical_casing()
+    {
+        var lowercase = ValidEssence.Replace("\"CreateResourceGroup\"", "\"createresourcegroup\"");
+        var h = CreateHarness(hasKey: true, Reply(lowercase));
+
+        var result = await Generate(h);
+
+        Assert.Contains("\"CreateResourceGroup\"", result.EssenceJson);
+        Assert.DoesNotContain("createresourcegroup", result.EssenceJson);
+    }
+
+    private const string MultiCloudEssence = """
+        {
+          "layers": {
+            "azure-rg": { "isEnabled": true, "operationType": "CreateResourceGroup", "parameters": { "resourceGroupName": "rg" }, "dependsOn": [] },
+            "aws-vpc": { "isEnabled": true, "operationType": "CreateVpc", "parameters": { "cidr": "10.0.0.0/16" }, "dependsOn": ["azure-rg"] },
+            "gcp-net": { "isEnabled": true, "operationType": "CreateNetwork", "parameters": {}, "dependsOn": ["azure-rg"] }
+          }
+        }
+        """;
+
+    [Fact]
+    public async Task Controller_create_accepts_a_multicloud_essence_with_no_declared_cloud()
+    {
+        var h = CreateHarness(hasKey: true);
+
+        var result = await CreateController(h).Create(
+            new CreateEssenceRequest("multi", h.CloudAccountId, MultiCloudEssence));
+
+        Assert.IsType<CreatedAtActionResult>(result);
+        Assert.Single(h.Db.Essences);
+    }
+
+    [Fact]
+    public async Task Controller_create_stores_lowercase_operation_type_in_canonical_casing()
+    {
+        var h = CreateHarness(hasKey: true);
+        var json = "{\"layers\":{\"a\":{\"isEnabled\":true,\"operationType\":\"createresourcegroup\",\"parameters\":{\"resourceGroupName\":\"rg\"},\"dependsOn\":[]}}}";
+
+        var result = await CreateController(h).Create(new CreateEssenceRequest("demo", h.CloudAccountId, json));
+
+        Assert.IsType<CreatedAtActionResult>(result);
+        var stored = await h.Db.Essences.SingleAsync();
+        Assert.Contains("\"CreateResourceGroup\"", stored.EssenceJson);
+        Assert.DoesNotContain("createresourcegroup", stored.EssenceJson);
+    }
+
+    [Fact]
+    public async Task Controller_create_rejects_a_numeric_operation_type_with_400_and_stores_nothing()
+    {
+        var h = CreateHarness(hasKey: true);
+        var json = "{\"layers\":{\"a\":{\"isEnabled\":true,\"operationType\":42,\"parameters\":{},\"dependsOn\":[]}}}";
+
+        var result = await CreateController(h).Create(new CreateEssenceRequest("demo", h.CloudAccountId, json));
+
+        var (status, error) = AssertErrorResult(result);
+        Assert.Equal(400, status);
+        Assert.Equal("bad_request", error.Error);
+        Assert.Contains("Layer 'a': operationType must be a string.", error.Message);
+        Assert.Empty(h.Db.Essences);
     }
 }
