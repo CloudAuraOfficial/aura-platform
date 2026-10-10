@@ -126,22 +126,21 @@ builder.Services.AddScoped<UserAiKeyService>();
 // HttpClient's implicit 100s. The providers turn the resulting TaskCanceledException
 // into a failed LlmCompletionResult (not a crash) as long as the caller didn't cancel.
 builder.Services.AddHttpClient("llm", c => c.Timeout = TimeSpan.FromSeconds(120));
+// LLM endpoints. Resolved here, at startup, so a malformed base URL fails the boot rather than
+// the first generation request. Blank values count as unset (see LlmEndpointUrls).
+var openAiUrl = LlmEndpointUrls.ChatCompletions(Environment.GetEnvironmentVariable("OPENAI_BASE_URL"), "https://api.openai.com/v1");
+var openRouterUrl = LlmEndpointUrls.ChatCompletions(Environment.GetEnvironmentVariable("OPENROUTER_BASE_URL"), "https://openrouter.ai/api/v1");
+var anthropicUrl = LlmEndpointUrls.AnthropicMessages(Environment.GetEnvironmentVariable("ANTHROPIC_BASE_URL"), "https://api.anthropic.com/v1");
+
 builder.Services.AddSingleton<ILlmProviderFactory>(sp =>
 {
     var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
 
-    // Accepts both URL conventions: a path-less prefix (OpenAI-SDK "base URL"
-    // convention) or the full /chat/completions endpoint.
-    var openRouterUrl = Environment.GetEnvironmentVariable("OPENROUTER_BASE_URL")
-        ?? "https://openrouter.ai/api/v1/chat/completions";
-    if (!openRouterUrl.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
-        openRouterUrl = openRouterUrl.TrimEnd('/') + "/chat/completions";
-
     var providers = new ILlmProvider[]
     {
         new OpenAiCompatibleLlmProvider(httpFactory.CreateClient("llm"),
-            "openai", "https://api.openai.com/v1/chat/completions", "gpt-4o"),
-        new AnthropicLlmProvider(httpFactory.CreateClient("llm")),
+            "openai", openAiUrl, "gpt-4o"),
+        new AnthropicLlmProvider(httpFactory.CreateClient("llm"), anthropicUrl),
         new OpenAiCompatibleLlmProvider(httpFactory.CreateClient("llm"),
             "openrouter", openRouterUrl, "openai/gpt-4o") // OpenRouter ids are namespaced vendor/model
     };
@@ -184,7 +183,9 @@ builder.Logging.Configure(opts => opts.ActivityTrackingOptions =
 
 builder.Services.AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(
-        new System.Text.Json.Serialization.JsonStringEnumConverter()));
+        new System.Text.Json.Serialization.JsonStringEnumConverter()))
+    .ConfigureApiBehaviorOptions(o =>
+        o.InvalidModelStateResponseFactory = Aura.Api.Middleware.InvalidModelStateResponse.Create);
 builder.Services.AddRazorPages();
 
 var app = builder.Build();

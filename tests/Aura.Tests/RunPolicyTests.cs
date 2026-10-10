@@ -52,6 +52,44 @@ public class RunPolicyTests
         Assert.Equal(expected, layers[0].RunPolicy);
     }
 
+    // Numeric text must not parse as a policy: Enum.TryParse would accept "7" (or "0") silently.
+    [Theory]
+    [InlineData("7")]
+    [InlineData("0")]
+    [InlineData("1")]
+    [InlineData("-1")]
+    [InlineData("")]
+    public void ParseAndSortLayers_RunPolicy_NumericOrEmptyText_Rejected(string value)
+    {
+        var json = $$"""
+            {
+              "layers": {
+                "L1": { "isEnabled": true, "operationType": "CreateVpc", "parameters": {}, "runPolicy": "{{value}}" }
+              }
+            }
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.NewGuid()));
+        Assert.Contains("unknown runPolicy", ex.Message);
+    }
+
+    [Fact]
+    public void ParseAndSortLayers_RunPolicy_NonStringJsonValue_Rejected()
+    {
+        var json = """
+            {
+              "layers": {
+                "L1": { "isEnabled": true, "operationType": "CreateVpc", "parameters": {}, "runPolicy": 1 }
+              }
+            }
+            """;
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.NewGuid()));
+        Assert.Contains("unknown runPolicy", ex.Message);
+    }
+
     [Fact]
     public void ParseAndSortLayers_UnknownRunPolicy_ThrowsAtRunCreation()
     {

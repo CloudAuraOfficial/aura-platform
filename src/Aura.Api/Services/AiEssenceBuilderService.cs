@@ -166,6 +166,13 @@ public class AiEssenceBuilderService
     public async Task<GenerateEssenceResponse> GenerateAsync(
         Guid userId, GenerateEssenceRequest request, Guid tenantId, CancellationToken ct)
     {
+        // [Required] on the request already rejects blank prompts over HTTP; this guard covers
+        // direct callers of the service, where a blank prompt would still burn paid tokens.
+        // No param name here: ArgumentException appends "(Parameter ...)" to Message,
+        // which would leak into the client-facing error.
+        if (string.IsNullOrWhiteSpace(request.Prompt))
+            throw new ArgumentException("Prompt must not be blank.");
+
         var provider = _providerFactory.GetProvider(request.Provider);
 
         var apiKey = await _keyService.GetDecryptedKeyAsync(userId, request.Provider, ct)
@@ -187,69 +194,86 @@ public class AiEssenceBuilderService
         string? essenceJson = null;
         var iterations = 0;
         string? lastError = null;
+        string? providerError = null;
+        int? providerStatus = null;
 
-        for (var i = 0; i < MaxIterations; i++)
+        try
         {
-            iterations++;
-            var userPrompt = i == 0
-                ? request.Prompt
-                : $"The previous response was not valid JSON. Error: {lastError}\n\nPlease fix and return ONLY valid Aura Essence JSON.\n\nOriginal request: {request.Prompt}";
-
-            var llmRequest = new LlmRequest(systemPrompt, userPrompt, apiKey, request.Model);
-            var result = await provider.GenerateAsync(llmRequest, ct);
-
-            totalInputTokens += result.InputTokens;
-            totalOutputTokens += result.OutputTokens;
-            if (!string.IsNullOrEmpty(result.Model))
-                model = result.Model;
-
-            if (!result.Success)
-                throw new InvalidOperationException($"LLM provider error: {result.Error}");
-
-            // Try to extract JSON from the response (strip markdown fences if present)
-            var content = ExtractJson(result.Content);
-
-            // Validate JSON
-            try
+            for (var i = 0; i < MaxIterations; i++)
             {
-                using var doc = JsonDocument.Parse(content);
-                var root = doc.RootElement;
-                if (root.TryGetProperty("layers", out _))
+                iterations++;
+                var userPrompt = i == 0
+                    ? request.Prompt
+                    : $"The previous response was rejected. Error: {lastError}\n\nPlease fix and return ONLY valid Aura Essence JSON.\n\nOriginal request: {request.Prompt}";
+
+                var llmRequest = new LlmRequest(systemPrompt, userPrompt, apiKey, request.Model);
+                var result = await provider.GenerateAsync(llmRequest, ct);
+
+                totalInputTokens += result.InputTokens;
+                totalOutputTokens += result.OutputTokens;
+                if (!string.IsNullOrEmpty(result.Model))
+                    model = result.Model;
+
+                // Provider failures (HTTP error, timeout) are not retried: break so the
+                // usage recorded so far is still logged (#21).
+                if (!result.Success)
+                {
+                    providerError = result.Error ?? "unknown provider error";
+                    providerStatus = result.HttpStatus;
+                    break;
+                }
+
+                // Try to extract JSON from the response (strip markdown fences if present)
+                var content = ExtractJson(result.Content);
+
+                lastError = ValidateEssenceJson(content);
+                if (lastError is null)
                 {
                     essenceJson = content;
                     break;
                 }
-                lastError = "JSON is valid but missing 'layers' property";
-            }
-            catch (JsonException ex)
-            {
-                lastError = ex.Message;
             }
         }
-
-        sw.Stop();
-
-        // Log usage for BOTH outcomes — tokens burned in failed iterations are paid
-        // usage and must be recorded, not lost when we throw (#21).
-        var log = new AiGenerationLog
+        finally
         {
-            TenantId = tenantId,
-            UserId = userId,
-            ProviderName = request.Provider,
-            Model = model,
-            Prompt = request.Prompt,
-            InputTokens = totalInputTokens,
-            OutputTokens = totalOutputTokens,
-            Iterations = iterations,
-            DurationMs = sw.ElapsedMilliseconds,
-            Success = essenceJson is not null
-        };
-        _db.Set<AiGenerationLog>().Add(log);
-        await _db.SaveChangesAsync(ct);
+            sw.Stop();
+
+            // Usage is paid for however the attempts end: a normal result, a provider failure,
+            // a client disconnect (ct is cancelled, so it must not reach SaveChanges), or any
+            // unexpected exception. Hence the finally and CancellationToken.None.
+            _db.Set<AiGenerationLog>().Add(new AiGenerationLog
+            {
+                TenantId = tenantId,
+                UserId = userId,
+                ProviderName = request.Provider,
+                Model = model,
+                Prompt = request.Prompt,
+                InputTokens = totalInputTokens,
+                OutputTokens = totalOutputTokens,
+                Iterations = iterations,
+                DurationMs = sw.ElapsedMilliseconds,
+                Success = essenceJson is not null
+            });
+            await _db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        // Client-facing messages stay plain. Provider bodies and validator reasons go to the log.
+        if (providerError is not null)
+        {
+            _logger.LogWarning(
+                "AI essence generation failed at provider: provider={Provider}, iterations={Iter}, httpStatus={Status}, error={Error}",
+                request.Provider, iterations, providerStatus, providerError);
+            throw new InvalidOperationException(DescribeProviderFailure(providerStatus));
+        }
 
         if (essenceJson is null)
+        {
+            _logger.LogWarning(
+                "AI essence generation produced no valid essence: provider={Provider}, iterations={Iter}, lastError={Error}",
+                request.Provider, iterations, lastError);
             throw new InvalidOperationException(
-                $"Failed to generate valid essence JSON after {iterations} attempts. Last error: {lastError}");
+                $"The model returned an invalid essence after {iterations} attempts. Try rephrasing the prompt.");
+        }
 
         _logger.LogInformation(
             "AI essence generated: provider={Provider}, model={Model}, tokens={In}+{Out}, iterations={Iter}, duration={Ms}ms",
@@ -258,6 +282,50 @@ public class AiEssenceBuilderService
         return new GenerateEssenceResponse(
             essenceJson, totalInputTokens, totalOutputTokens,
             iterations, sw.ElapsedMilliseconds, model);
+    }
+
+    // Client-facing text for a failed provider call. Status codes map to actionable wording;
+    // the provider's own error body stays in the server log.
+    internal static string DescribeProviderFailure(int? httpStatus) => httpStatus switch
+    {
+        401 or 403 => "The AI provider rejected the API key. Check the key in Account Settings.",
+        null => "The AI provider request failed. Try again.",
+        _ => $"The AI provider returned HTTP {httpStatus}. Try again later.",
+    };
+
+    // Returns null when the model output is a runnable essence, otherwise a short reason
+    // (fed back to the model on retry). Uses the same parser deployments use, so an essence
+    // we return is one a run can actually be created from: a cycle, an unknown runPolicy or
+    // executor, or an empty layer set would otherwise only fail later, at run creation.
+    // Any parser exception counts as an invalid output. Letting one escape would skip the
+    // retry loop and the usage row.
+    internal static string? ValidateEssenceJson(
+        string content, Func<string, List<DeploymentLayer>>? parse = null)
+    {
+        parse ??= json => DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.Empty);
+
+        try
+        {
+            using var doc = JsonDocument.Parse(content);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return "response is valid JSON but not an object";
+            if (!doc.RootElement.TryGetProperty("layers", out _))
+                return "JSON is valid but missing 'layers' property";
+        }
+        catch (JsonException ex)
+        {
+            return ex.Message;
+        }
+
+        try
+        {
+            var layers = parse(content);
+            return layers.Count == 0 ? "essence has no enabled layers" : null;
+        }
+        catch (Exception ex)
+        {
+            return ex.Message;
+        }
     }
 
     private static string ExtractJson(string content)

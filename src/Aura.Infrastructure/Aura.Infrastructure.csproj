@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Aura.Tests" />
+    <InternalsVisibleTo Include="Aura.Api" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="AWSSDK.SecurityToken" Version="4.0.5.4" />
