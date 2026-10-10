@@ -146,6 +146,7 @@ builder.Services.AddSingleton<ILlmProviderFactory>(sp =>
     };
     return new LlmProviderFactory(providers);
 });
+builder.Services.AddSingleton<IEssenceValidator, EssenceValidator>();
 builder.Services.AddScoped<AiEssenceBuilderService>();
 
 // H5: Redis with optional authentication

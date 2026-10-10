@@ -50,11 +50,15 @@ public class EssenceGenerationE2ETests
         private readonly Queue<Func<HttpResponseMessage>> _steps;
         public int CallCount { get; private set; }
 
+        // Request bodies in call order, so tests can check what the model was told on a retry.
+        public List<string> RequestBodies { get; } = new();
+
         public ScriptedTransport(IEnumerable<Func<HttpResponseMessage>> steps) => _steps = new(steps);
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             CallCount++;
+            RequestBodies.Add(request.Content?.ReadAsStringAsync(ct).GetAwaiter().GetResult() ?? "");
             if (_steps.Count == 0)
                 return Task.FromException<HttpResponseMessage>(
                     new InvalidOperationException("Unexpected extra provider call in test."));
@@ -147,6 +151,7 @@ public class EssenceGenerationE2ETests
             new LlmProviderFactory(new ILlmProvider[] { provider }),
             new UserAiKeyService(db, crypto.Object),
             db,
+            new EssenceValidator(),
             logger);
 
         return new Harness
@@ -171,7 +176,7 @@ public class EssenceGenerationE2ETests
 
         var result = await Generate(h);
 
-        Assert.Null(AiEssenceBuilderService.ValidateEssenceJson(result.EssenceJson));
+        Assert.Null(new EssenceValidator().Validate(result.EssenceJson));
         var layers = DeploymentOrchestrationService.ParseAndSortLayers(result.EssenceJson, Guid.NewGuid());
         Assert.Equal(new[] { "create-rg", "deploy-vm", "health-check" }, layers.Select(l => l.LayerName));
         Assert.Equal(new[] { 0, 1, 2 }, layers.Select(l => l.SortOrder));
@@ -194,7 +199,7 @@ public class EssenceGenerationE2ETests
 
         var result = await Generate(h);
 
-        Assert.Null(AiEssenceBuilderService.ValidateEssenceJson(result.EssenceJson));
+        Assert.Null(new EssenceValidator().Validate(result.EssenceJson));
         Assert.StartsWith("{", result.EssenceJson);
     }
 
@@ -355,7 +360,7 @@ public class EssenceGenerationE2ETests
     {
         // ParseAndSortLayers only throws the types it documents today. Whatever a parser throws,
         // the retry loop must see a rejection, so nothing escapes ValidateEssenceJson.
-        var reason = AiEssenceBuilderService.ValidateEssenceJson(
+        var reason = new EssenceValidator().Validate(
             ValidEssence, _ => throw new NullReferenceException("simulated parser bug"));
 
         Assert.NotNull(reason);
@@ -407,7 +412,9 @@ public class EssenceGenerationE2ETests
             h.Db,
             Mock.Of<ITenantContext>(t => t.TenantId == Guid.Empty),
             Mock.Of<IAuditService>(),
-            h.Service)
+            h.Service,
+            new EssenceValidator(),
+            Mock.Of<ILogger<EssencesController>>())
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext { User = principal } }
         };
@@ -436,7 +443,7 @@ public class EssenceGenerationE2ETests
 
         var ok = Assert.IsType<OkObjectResult>(result);
         var body = Assert.IsType<GenerateEssenceResponse>(ok.Value);
-        Assert.Null(AiEssenceBuilderService.ValidateEssenceJson(body.EssenceJson));
+        Assert.Null(new EssenceValidator().Validate(body.EssenceJson));
     }
 
     [Fact]
@@ -578,5 +585,109 @@ public class EssenceGenerationE2ETests
                 Assert.IsType<BadRequestObjectResult>(InvalidModelStateResponse.Create(Build())).Value).Message;
             Assert.Equal("The Prompt field is required.", message);
         }
+    }
+
+    // ---- operation types: an unknown type is rejected at generation and fed back to the model ----
+
+    // The health-check layer names a type with no handler, as the GCP prompt once did.
+    private static readonly string UnknownTypeEssence =
+        ValidEssence.Replace("\"HttpHealthCheck\"", "\"DeployDeploymentManager\"");
+
+    [Fact]
+    public async Task Unknown_operation_type_is_rejected_and_the_retry_is_told_why()
+    {
+        var h = CreateHarness(hasKey: true, Reply(UnknownTypeEssence), Reply(ValidEssence));
+
+        var result = await Generate(h);
+
+        Assert.Equal(2, result.Iterations);
+        Assert.Equal(2, h.Transport.CallCount);
+        Assert.Contains("Unknown operationType", h.Transport.RequestBodies[1]);
+        Assert.Contains("DeployDeploymentManager", h.Transport.RequestBodies[1]);
+        Assert.Null(new EssenceValidator().Validate(result.EssenceJson));
+        Assert.True((await h.Db.Set<AiGenerationLog>().SingleAsync()).Success);
+    }
+
+    [Fact]
+    public async Task Unknown_operation_type_on_every_attempt_fails_and_keeps_the_type_out_of_the_client_message()
+    {
+        var h = CreateHarness(hasKey: true, Reply(UnknownTypeEssence), Reply(UnknownTypeEssence), Reply(UnknownTypeEssence));
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => Generate(h));
+
+        Assert.Equal("The model returned an invalid essence after 3 attempts. Try rephrasing the prompt.", ex.Message);
+        Assert.DoesNotContain("DeployDeploymentManager", ex.Message);
+        Assert.Equal(3, h.Transport.CallCount);
+        Assert.Contains(h.Logger.Messages, m => m.Contains("DeployDeploymentManager"));
+        Assert.False((await h.Db.Set<AiGenerationLog>().SingleAsync()).Success);
+    }
+
+    // ---- operation types: an unknown type is rejected when an essence is saved ----
+
+    private static (EssencesController controller, Essence essence) WithStoredEssence(Harness h, string json)
+    {
+        var essence = new Essence
+        {
+            Id = Guid.NewGuid(), TenantId = Guid.Empty, Name = "demo",
+            CloudAccountId = h.CloudAccountId, EssenceJson = json, CurrentVersion = 1
+        };
+        h.Db.Essences.Add(essence);
+        h.Db.SaveChanges();
+        return (CreateController(h), essence);
+    }
+
+    [Fact]
+    public async Task Controller_create_rejects_unknown_operation_type_with_standard_error_shape()
+    {
+        var h = CreateHarness(hasKey: true);
+
+        var result = await CreateController(h).Create(
+            new CreateEssenceRequest("demo", h.CloudAccountId, UnknownTypeEssence));
+
+        var (status, error) = AssertErrorResult(result);
+        Assert.Equal(400, status);
+        Assert.Equal("bad_request", error.Error);
+        Assert.Contains("layer 'health-check' uses 'DeployDeploymentManager'", error.Message);
+        Assert.Empty(h.Db.Essences);
+    }
+
+    [Fact]
+    public async Task Controller_create_accepts_known_operation_types()
+    {
+        var h = CreateHarness(hasKey: true);
+
+        var result = await CreateController(h).Create(
+            new CreateEssenceRequest("demo", h.CloudAccountId, ValidEssence));
+
+        Assert.IsType<CreatedAtActionResult>(result);
+        Assert.Single(h.Db.Essences);
+    }
+
+    [Fact]
+    public async Task Controller_update_rejects_unknown_operation_type_and_keeps_the_stored_json()
+    {
+        var h = CreateHarness(hasKey: true);
+        var (controller, essence) = WithStoredEssence(h, ValidEssence);
+
+        var result = await controller.Update(essence.Id, new UpdateEssenceRequest(null, null, UnknownTypeEssence));
+
+        var (status, _) = AssertErrorResult(result);
+        Assert.Equal(400, status);
+        var stored = await h.Db.Essences.SingleAsync();
+        Assert.Equal(ValidEssence, stored.EssenceJson);
+        Assert.Equal(1, stored.CurrentVersion);
+    }
+
+    [Fact]
+    public async Task Controller_clone_rejects_a_source_that_names_an_unknown_operation_type()
+    {
+        var h = CreateHarness(hasKey: true);
+        var (controller, essence) = WithStoredEssence(h, UnknownTypeEssence);
+
+        var result = await controller.Clone(essence.Id, new CloneEssenceRequest("copy"));
+
+        var (status, _) = AssertErrorResult(result);
+        Assert.Equal(400, status);
+        Assert.Single(h.Db.Essences);
     }
 }

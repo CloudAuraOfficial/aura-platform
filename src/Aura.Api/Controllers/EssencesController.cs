@@ -8,6 +8,7 @@ using Aura.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Aura.Api.Controllers;
 
@@ -20,14 +21,18 @@ public class EssencesController : ControllerBase
     private readonly ITenantContext _tenant;
     private readonly IAuditService _audit;
     private readonly AiEssenceBuilderService _aiBuilder;
+    private readonly IEssenceValidator _validator;
+    private readonly ILogger<EssencesController> _logger;
 
     public EssencesController(AuraDbContext db, ITenantContext tenant, IAuditService audit,
-        AiEssenceBuilderService aiBuilder)
+        AiEssenceBuilderService aiBuilder, IEssenceValidator validator, ILogger<EssencesController> logger)
     {
         _db = db;
         _tenant = tenant;
         _audit = audit;
         _aiBuilder = aiBuilder;
+        _validator = validator;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -59,6 +64,9 @@ public class EssencesController : ControllerBase
         var accountExists = await _db.CloudAccounts.AnyAsync(c => c.Id == request.CloudAccountId);
         if (!accountExists)
             return BadRequest(new ErrorResponse("bad_request", "Cloud account not found.", 400));
+
+        if (RejectUnknownOperationType(request.EssenceJson, "create") is { } rejected)
+            return rejected;
 
         var essence = new Essence
         {
@@ -94,6 +102,9 @@ public class EssencesController : ControllerBase
         var essence = await _db.Essences.FindAsync(id);
         if (essence is null)
             return NotFound(new ErrorResponse("not_found", "Essence not found.", 404));
+
+        if (request.EssenceJson is not null && RejectUnknownOperationType(request.EssenceJson, "update") is { } rejected)
+            return rejected;
 
         if (request.Name is not null)
             essence.Name = request.Name;
@@ -270,6 +281,9 @@ public class EssencesController : ControllerBase
         if (source is null)
             return NotFound(new ErrorResponse("not_found", "Essence not found.", 404));
 
+        if (RejectUnknownOperationType(source.EssenceJson, "clone") is { } rejected)
+            return rejected;
+
         var clone = new Essence
         {
             TenantId = _tenant.TenantId,
@@ -335,6 +349,20 @@ public class EssencesController : ControllerBase
         await _audit.LogAsync(_tenant.TenantId, GetCurrentUserId(), "delete", "Essence", id);
 
         return NoContent();
+    }
+
+    // Standard 400 when essence JSON names an operationType the Worker cannot run. The reason
+    // names the layer and type, so it is safe to return; it is also logged for operators.
+    private IActionResult? RejectUnknownOperationType(string essenceJson, string action)
+    {
+        var reason = _validator.ValidateOperationTypes(essenceJson);
+        if (reason is null)
+            return null;
+
+        _logger.LogWarning(
+            "Essence {Action} rejected: tenant={TenantId}, user={UserId}, reason={Reason}",
+            action, _tenant.TenantId, GetCurrentUserId(), reason);
+        return BadRequest(new ErrorResponse("bad_request", reason, 400));
     }
 
     private Guid GetCurrentUserId()
