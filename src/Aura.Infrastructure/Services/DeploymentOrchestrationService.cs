@@ -56,7 +56,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         return run;
     }
 
-    public static List<DeploymentLayer> ParseAndSortLayers(string snapshotJson, Guid runId)
+    internal static List<DeploymentLayer> ParseAndSortLayers(string snapshotJson, Guid runId)
     {
         using var doc = JsonDocument.Parse(snapshotJson);
         var root = doc.RootElement;
@@ -148,15 +148,19 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
             // #13: optional finally-semantics. Strict parse — runPolicy is a
             // safety property, so a typo must fail at run creation rather than
             // silently fall back to fail-stop and reintroduce orphaning.
+            // Names only: Enum.TryParse also accepts numeric text ("7", "0"), which would turn
+            // a typo into a real policy value. Enum.IsDefined alone still accepts "0" and "1".
             var runPolicy = RunPolicy.OnSuccess;
             if (val.TryGetProperty("runPolicy", out var rpProp))
             {
-                if (rpProp.ValueKind != JsonValueKind.String
-                    || !Enum.TryParse<RunPolicy>(rpProp.GetString(), ignoreCase: true, out runPolicy))
+                var policyText = rpProp.ValueKind == JsonValueKind.String ? rpProp.GetString() : null;
+                if (policyText is null
+                    || !Enum.GetNames<RunPolicy>().Contains(policyText, StringComparer.OrdinalIgnoreCase))
                 {
                     throw new InvalidOperationException(
                         $"Layer '{name}': unknown runPolicy '{rpProp}'. Valid values: onSuccess, always.");
                 }
+                runPolicy = Enum.Parse<RunPolicy>(policyText, ignoreCase: true);
             }
 
             definitions[name] = new LayerDefinition(name, executorType, parameters, scriptPath, dependsOn, operationType, cloudAccountId, runPolicy);
