@@ -17,8 +17,8 @@ public class AnthropicLlmProvider : ILlmProvider
 
     public string ProviderName => "anthropic";
 
-    // apiUrl comes from configuration (ANTHROPIC_BASE_URL) so deployments can point at a
-    // proxy or gateway; the default is Anthropic's public endpoint.
+    // apiUrl is the resolved messages endpoint (see LlmEndpointUrls, ANTHROPIC_BASE_URL) so
+    // deployments can point at a proxy or gateway; the default is Anthropic's public endpoint.
     public AnthropicLlmProvider(HttpClient http, string apiUrl = DefaultApiUrl)
     {
         _http = http;
@@ -28,7 +28,8 @@ public class AnthropicLlmProvider : ILlmProvider
     public async Task<LlmCompletionResult> GenerateAsync(LlmRequest request, CancellationToken ct = default)
     {
         var model = request.Model ?? DefaultModel;
-        LlmCompletionResult Fail(string error) => new("", 0, 0, model, false, error);
+        LlmCompletionResult Fail(string error, int? httpStatus = null) =>
+            new("", 0, 0, model, false, error, httpStatus);
 
         var payload = new
         {
@@ -62,7 +63,8 @@ public class AnthropicLlmProvider : ILlmProvider
 
             if (!response.IsSuccessStatusCode)
             {
-                return Fail($"Anthropic API error {(int)response.StatusCode}: {TruncateError(body)}");
+                return Fail($"Anthropic API error {(int)response.StatusCode}: {TruncateError(body)}",
+                    (int)response.StatusCode);
             }
         }
         catch (Exception ex) when (ex is HttpRequestException
