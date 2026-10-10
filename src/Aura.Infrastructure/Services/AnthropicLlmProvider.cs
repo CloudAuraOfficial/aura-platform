@@ -11,14 +11,15 @@ namespace Aura.Infrastructure.Services;
 public class AnthropicLlmProvider : ILlmProvider
 {
     private readonly HttpClient _http;
+    private readonly string _apiUrl;
     private const string DefaultModel = "claude-sonnet-4-20250514";
-    private const string ApiUrl = "https://api.anthropic.com/v1/messages";
 
     public string ProviderName => "anthropic";
 
-    public AnthropicLlmProvider(HttpClient http)
+    public AnthropicLlmProvider(HttpClient http, string apiUrl)
     {
         _http = http;
+        _apiUrl = apiUrl;
     }
 
     public async Task<LlmCompletionResult> GenerateAsync(LlmRequest request, CancellationToken ct = default)
@@ -38,7 +39,7 @@ public class AnthropicLlmProvider : ILlmProvider
         };
 
         var json = JsonSerializer.Serialize(payload);
-        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, ApiUrl);
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, _apiUrl);
         try
         {
             httpRequest.Headers.Add("x-api-key", request.ApiKey.Trim());

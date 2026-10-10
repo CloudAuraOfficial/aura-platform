@@ -56,7 +56,9 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         return run;
     }
 
-    internal static List<DeploymentLayer> ParseAndSortLayers(string snapshotJson, Guid runId)
+    // Public so the AI essence builder can validate drafts with the exact parser the worker
+    // runs at deployment time. Throws JsonException / InvalidOperationException on bad input.
+    public static List<DeploymentLayer> ParseAndSortLayers(string snapshotJson, Guid runId)
     {
         using var doc = JsonDocument.Parse(snapshotJson);
         var root = doc.RootElement;

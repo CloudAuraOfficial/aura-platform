@@ -13,7 +13,7 @@ public class LlmProviderFactoryTests
         return new LlmProviderFactory(new ILlmProvider[]
         {
             new OpenAiCompatibleLlmProvider(http, "openai", "https://api.openai.com/v1/chat/completions", "gpt-4o"),
-            new AnthropicLlmProvider(http),
+            new AnthropicLlmProvider(http, "http://fake-llm.invalid/v1/messages"),
             new OpenAiCompatibleLlmProvider(http, "openrouter", "https://openrouter.ai/api/v1/chat/completions", "openai/gpt-4o")
         });
     }

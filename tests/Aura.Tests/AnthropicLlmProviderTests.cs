@@ -12,6 +12,9 @@ namespace Aura.Tests;
 // as OpenAiCompatibleLlmProvider; full guard matrix lives in that suite).
 public class AnthropicLlmProviderTests
 {
+    // Stub endpoint: the transport is mocked, so nothing is ever sent here.
+    private const string FakeUrl = "http://fake-llm.invalid/v1/messages";
+
     private static HttpClient MockClient(HttpStatusCode status, string body)
     {
         var handler = new Mock<HttpMessageHandler>();
@@ -34,7 +37,7 @@ public class AnthropicLlmProviderTests
           "usage": { "input_tokens": 9, "output_tokens": 5 }
         }
         """;
-        var result = await new AnthropicLlmProvider(MockClient(HttpStatusCode.OK, body))
+        var result = await new AnthropicLlmProvider(MockClient(HttpStatusCode.OK, body), FakeUrl)
             .GenerateAsync(new LlmRequest("sys", "user", "sk-ant-test"));
 
         Assert.True(result.Success);
@@ -47,7 +50,7 @@ public class AnthropicLlmProviderTests
     public async Task GenerateAsync_returns_failure_on_200_without_content()
     {
         var result = await new AnthropicLlmProvider(
-                MockClient(HttpStatusCode.OK, "{\"error\":{\"message\":\"overloaded\"}}"))
+                MockClient(HttpStatusCode.OK, "{\"error\":{\"message\":\"overloaded\"}}"), FakeUrl)
             .GenerateAsync(new LlmRequest("sys", "user", "sk-ant-test"));
 
         Assert.False(result.Success);
@@ -60,7 +63,7 @@ public class AnthropicLlmProviderTests
         const string body = """
         { "content": [ { "type": "text", "text": "ok" } ], "usage": null }
         """;
-        var result = await new AnthropicLlmProvider(MockClient(HttpStatusCode.OK, body))
+        var result = await new AnthropicLlmProvider(MockClient(HttpStatusCode.OK, body), FakeUrl)
             .GenerateAsync(new LlmRequest("sys", "user", "sk-ant-test"));
 
         Assert.True(result.Success);

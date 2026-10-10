@@ -187,13 +187,14 @@ public class AiEssenceBuilderService
         string? essenceJson = null;
         var iterations = 0;
         string? lastError = null;
+        string? providerError = null;
 
         for (var i = 0; i < MaxIterations; i++)
         {
             iterations++;
             var userPrompt = i == 0
                 ? request.Prompt
-                : $"The previous response was not valid JSON. Error: {lastError}\n\nPlease fix and return ONLY valid Aura Essence JSON.\n\nOriginal request: {request.Prompt}";
+                : $"The previous response was not a valid Aura Essence. Error: {lastError}\n\nPlease fix and return ONLY valid Aura Essence JSON.\n\nOriginal request: {request.Prompt}";
 
             var llmRequest = new LlmRequest(systemPrompt, userPrompt, apiKey, request.Model);
             var result = await provider.GenerateAsync(llmRequest, ct);
@@ -203,27 +204,22 @@ public class AiEssenceBuilderService
             if (!string.IsNullOrEmpty(result.Model))
                 model = result.Model;
 
+            // Timeouts, HTTP errors and bad keys are not retried: the provider already
+            // failed the request, and re-sending it would only repeat the same failure.
             if (!result.Success)
-                throw new InvalidOperationException($"LLM provider error: {result.Error}");
-
-            // Try to extract JSON from the response (strip markdown fences if present)
-            var content = ExtractJson(result.Content);
-
-            // Validate JSON
-            try
             {
-                using var doc = JsonDocument.Parse(content);
-                var root = doc.RootElement;
-                if (root.TryGetProperty("layers", out _))
-                {
-                    essenceJson = content;
-                    break;
-                }
-                lastError = "JSON is valid but missing 'layers' property";
+                providerError = result.Error;
+                break;
             }
-            catch (JsonException ex)
+
+            // Strip markdown fences if present, then hold the draft to the same checks
+            // the worker applies at deployment time.
+            var candidate = ExtractJson(result.Content);
+            lastError = ValidateEssence(candidate);
+            if (lastError is null)
             {
-                lastError = ex.Message;
+                essenceJson = candidate;
+                break;
             }
         }
 
@@ -248,8 +244,16 @@ public class AiEssenceBuilderService
         await _db.SaveChangesAsync(ct);
 
         if (essenceJson is null)
-            throw new InvalidOperationException(
-                $"Failed to generate valid essence JSON after {iterations} attempts. Last error: {lastError}");
+        {
+            var reason = providerError is not null
+                ? $"LLM provider error: {providerError}"
+                : $"Failed to generate valid essence JSON after {iterations} attempts. Last error: {lastError}";
+
+            _logger.LogWarning(
+                "AI essence generation failed: provider={Provider}, model={Model}, tokens={In}+{Out}, iterations={Iter}, duration={Ms}ms, reason={Reason}",
+                request.Provider, model, totalInputTokens, totalOutputTokens, iterations, sw.ElapsedMilliseconds, reason);
+            throw new InvalidOperationException(reason);
+        }
 
         _logger.LogInformation(
             "AI essence generated: provider={Provider}, model={Model}, tokens={In}+{Out}, iterations={Iter}, duration={Ms}ms",
@@ -258,6 +262,33 @@ public class AiEssenceBuilderService
         return new GenerateEssenceResponse(
             essenceJson, totalInputTokens, totalOutputTokens,
             iterations, sw.ElapsedMilliseconds, model);
+    }
+
+    // Returns null when the draft is a runnable essence, otherwise the reason it is not.
+    // Uses the worker's own parser so "valid here" means "will parse at deployment".
+    private static string? ValidateEssence(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("layers", out var layers)
+                || layers.ValueKind != JsonValueKind.Object)
+                return "JSON is valid but missing an object-valued 'layers' property";
+
+            return DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.Empty).Count == 0
+                ? "essence defines no enabled layers"
+                : null;
+        }
+        catch (JsonException ex)
+        {
+            return $"response is not valid JSON: {ex.Message}";
+        }
+        catch (InvalidOperationException ex)
+        {
+            return $"essence failed validation: {ex.Message}";
+        }
     }
 
     private static string ExtractJson(string content)

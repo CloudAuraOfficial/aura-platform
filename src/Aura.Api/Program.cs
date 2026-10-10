@@ -130,20 +130,29 @@ builder.Services.AddSingleton<ILlmProviderFactory>(sp =>
 {
     var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
 
-    // Accepts both URL conventions: a path-less prefix (OpenAI-SDK "base URL"
-    // convention) or the full /chat/completions endpoint.
-    var openRouterUrl = Environment.GetEnvironmentVariable("OPENROUTER_BASE_URL")
-        ?? "https://openrouter.ai/api/v1/chat/completions";
-    if (!openRouterUrl.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
-        openRouterUrl = openRouterUrl.TrimEnd('/') + "/chat/completions";
+    // Each provider's endpoint comes from env (<PROVIDER>_BASE_URL) so a proxy or
+    // gateway can be substituted without a code change. Accepts both URL conventions:
+    // a path-less prefix (OpenAI-SDK "base URL" convention) or the full endpoint.
+    string ResolveEndpoint(string envVar, string defaultUrl, string endpointPath)
+    {
+        var url = Environment.GetEnvironmentVariable(envVar) ?? defaultUrl;
+        if (!url.EndsWith(endpointPath, StringComparison.OrdinalIgnoreCase))
+            url = url.TrimEnd('/') + endpointPath;
+        return url;
+    }
 
     var providers = new ILlmProvider[]
     {
         new OpenAiCompatibleLlmProvider(httpFactory.CreateClient("llm"),
-            "openai", "https://api.openai.com/v1/chat/completions", "gpt-4o"),
-        new AnthropicLlmProvider(httpFactory.CreateClient("llm")),
+            "openai",
+            ResolveEndpoint("OPENAI_BASE_URL", "https://api.openai.com/v1", "/chat/completions"),
+            "gpt-4o"),
+        new AnthropicLlmProvider(httpFactory.CreateClient("llm"),
+            ResolveEndpoint("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1", "/messages")),
         new OpenAiCompatibleLlmProvider(httpFactory.CreateClient("llm"),
-            "openrouter", openRouterUrl, "openai/gpt-4o") // OpenRouter ids are namespaced vendor/model
+            "openrouter",
+            ResolveEndpoint("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1", "/chat/completions"),
+            "openai/gpt-4o") // OpenRouter ids are namespaced vendor/model
     };
     return new LlmProviderFactory(providers);
 });
@@ -184,7 +193,9 @@ builder.Logging.Configure(opts => opts.ActivityTrackingOptions =
 
 builder.Services.AddControllers()
     .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(
-        new System.Text.Json.Serialization.JsonStringEnumConverter()));
+        new System.Text.Json.Serialization.JsonStringEnumConverter()))
+    .ConfigureApiBehaviorOptions(o =>
+        o.InvalidModelStateResponseFactory = InvalidModelStateResponse.Create);
 builder.Services.AddRazorPages();
 
 var app = builder.Build();
