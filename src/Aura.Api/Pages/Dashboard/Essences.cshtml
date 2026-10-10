@@ -666,24 +666,51 @@ document.getElementById('aiForm').addEventListener('submit', function(ev) {
     errEl.style.display = 'none';
     successEl.style.display = 'none';
     statsEl.style.display = 'none';
+
+    function showAiError(msg) {
+        errEl.textContent = msg;
+        errEl.style.display = 'block';
+    }
+
+    if (!accountId) {
+        showAiError('Add a cloud account before generating an essence.');
+        return;
+    }
+    if (!provider) {
+        showAiError('No AI provider is available.');
+        return;
+    }
+
     btn.disabled = true;
     btn.textContent = 'Generating...';
 
     (async function() {
-        var res = await api('/api/v1/essences/generate', {
-            method: 'POST',
-            body: JSON.stringify({ prompt: prompt, cloudAccountId: accountId, provider: provider })
-        });
+        try {
+            var res = await api('/api/v1/essences/generate', {
+                method: 'POST',
+                body: JSON.stringify({ prompt: prompt, cloudAccountId: accountId, provider: provider })
+            });
 
-        btn.disabled = false;
-        btn.textContent = 'Generate Essence';
+            // 401 already redirected to login
+            if (!res) return;
 
-        if (!res) return;
-
-        if (res.error) {
-            errEl.textContent = res.message;
-            errEl.style.display = 'block';
+            // Error bodies are {error, message, statusCode}. Anything else (a success
+            // without an essence, or a body we don't recognise) is treated as a failure.
+            if (res.error) {
+                showAiError(res.message || 'Essence generation failed.');
+                return;
+            }
+            if (!res.essenceJson) {
+                showAiError('Essence generation returned no result. Please try again.');
+                return;
+            }
+        } catch (e) {
+            // Network failure, or a non-JSON response (e.g. a gateway error page)
+            showAiError('Could not complete generation. Check your connection and try again.');
             return;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Generate Essence';
         }
 
         // Show stats
