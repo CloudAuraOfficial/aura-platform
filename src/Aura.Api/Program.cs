@@ -126,24 +126,15 @@ builder.Services.AddScoped<UserAiKeyService>();
 // HttpClient's implicit 100s. The providers turn the resulting TaskCanceledException
 // into a failed LlmCompletionResult (not a crash) as long as the caller didn't cancel.
 builder.Services.AddHttpClient("llm", c => c.Timeout = TimeSpan.FromSeconds(120));
+// LLM endpoints. Resolved here, at startup, so a malformed base URL fails the boot rather than
+// the first generation request. Blank values count as unset (see LlmEndpointUrls).
+var openAiUrl = LlmEndpointUrls.ChatCompletions(Environment.GetEnvironmentVariable("OPENAI_BASE_URL"), "https://api.openai.com/v1");
+var openRouterUrl = LlmEndpointUrls.ChatCompletions(Environment.GetEnvironmentVariable("OPENROUTER_BASE_URL"), "https://openrouter.ai/api/v1");
+var anthropicUrl = LlmEndpointUrls.AnthropicMessages(Environment.GetEnvironmentVariable("ANTHROPIC_BASE_URL"), "https://api.anthropic.com/v1");
+
 builder.Services.AddSingleton<ILlmProviderFactory>(sp =>
 {
     var httpFactory = sp.GetRequiredService<IHttpClientFactory>();
-
-    // Endpoints come from env with public defaults. Accepts both URL conventions: a
-    // path-less prefix (OpenAI-SDK "base URL" convention) or the full /chat/completions endpoint.
-    static string ChatCompletionsUrl(string envVar, string defaultUrl)
-    {
-        var url = Environment.GetEnvironmentVariable(envVar) ?? defaultUrl;
-        if (!url.EndsWith("/chat/completions", StringComparison.OrdinalIgnoreCase))
-            url = url.TrimEnd('/') + "/chat/completions";
-        return url;
-    }
-
-    var openAiUrl = ChatCompletionsUrl("OPENAI_BASE_URL", "https://api.openai.com/v1");
-    var openRouterUrl = ChatCompletionsUrl("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1");
-    var anthropicUrl = Environment.GetEnvironmentVariable("ANTHROPIC_API_URL")
-        ?? "https://api.anthropic.com/v1/messages";
 
     var providers = new ILlmProvider[]
     {

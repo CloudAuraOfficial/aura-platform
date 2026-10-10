@@ -44,7 +44,7 @@ integration suites), `dotnet build` (0 errors), and a syntax check of the inline
 | 6 | UI | `api()` throws on a non-JSON body (e.g. a gateway error page), and `fetch` rejects on network failure. Neither was caught, so the button stayed on "Generating..." forever. | `try/catch/finally` around the request. The button always re-enables. Shows a clear message. |
 | 7 | UI | A success response with no `essenceJson` was shown as success. | Treated as a failure with a message. |
 | 8 | UI | No cloud account, or no provider, produced a confusing server-side 400. | Client-side guard with a clear message. |
-| 9 | Config | The Anthropic endpoint was a hardcoded constant, unlike OpenRouter. | `ANTHROPIC_API_URL` and `OPENAI_BASE_URL` read from env, with the public defaults. Documented in `.env.example`. |
+| 9 | Config | The Anthropic endpoint was a hardcoded constant, unlike OpenRouter. | `ANTHROPIC_BASE_URL` and `OPENAI_BASE_URL` read from env, with the public defaults. Documented in `.env.example`. |
 
 Known gaps, not changed here:
 
