@@ -56,7 +56,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         return run;
     }
 
-    internal static List<DeploymentLayer> ParseAndSortLayers(string snapshotJson, Guid runId)
+    public static List<DeploymentLayer> ParseAndSortLayers(string snapshotJson, Guid runId)
     {
         using var doc = JsonDocument.Parse(snapshotJson);
         var root = doc.RootElement;
