@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
@@ -15,11 +14,12 @@ public class AiEssenceBuilderService
     private readonly ILlmProviderFactory _providerFactory;
     private readonly UserAiKeyService _keyService;
     private readonly AuraDbContext _db;
+    private readonly IEssenceValidator _validator;
     private readonly ILogger<AiEssenceBuilderService> _logger;
 
     private const int MaxIterations = 3;
 
-    private const string AzureSystemPrompt = """
+    internal const string AzureSystemPrompt = """
         You are an infrastructure-as-code expert for the Aura Platform. Your job is to generate a valid Aura Essence JSON definition based on the user's natural language description.
 
         An Essence JSON has this structure:
@@ -63,7 +63,7 @@ public class AiEssenceBuilderService
     // Placeholder until Epic 1 lands the AWS handler set. Operation list is the
     // intended target surface; the model can use it to scaffold reasonable JSON
     // even before the handlers exist.
-    private const string AwsSystemPrompt = """
+    internal const string AwsSystemPrompt = """
         You are an infrastructure-as-code expert for the Aura Platform. Your job is to generate a valid Aura Essence JSON definition for AWS based on the user's natural language description.
 
         An Essence JSON has this structure:
@@ -105,7 +105,7 @@ public class AiEssenceBuilderService
         """;
 
     // Placeholder until Epic 2 lands the GCP handler set.
-    private const string GcpSystemPrompt = """
+    internal const string GcpSystemPrompt = """
         You are an infrastructure-as-code expert for the Aura Platform. Your job is to generate a valid Aura Essence JSON definition for Google Cloud based on the user's natural language description.
 
         An Essence JSON has this structure:
@@ -131,7 +131,7 @@ public class AiEssenceBuilderService
           }
         }
 
-        Target GCP operation types (handlers land in Epic 2): CreateNetwork, DeleteNetwork, CreateGceInstance, StartGceInstance, StopGceInstance, DeleteGceInstance, CreateGcsBucket, DeleteGcsBucket, DeployCloudRunService, DeployDeploymentManager, CreateServiceAccount, CreateFirewallRule, HttpHealthCheck
+        Target GCP operation types (handlers land in Epic 2): CreateNetwork, DeleteNetwork, CreateGceInstance, StartGceInstance, StopGceInstance, DeleteGceInstance, CreateGcsBucket, DeleteGcsBucket, DeployCloudRunService, CreateServiceAccount, CreateFirewallRule, HttpHealthCheck
 
         Common GCE parameters: { "machineType": "e2-small", "zone": "us-east1-b", "sourceImage": "projects/debian-cloud/global/images/family/debian-12", "network": "default", "tags": [...] }
 
@@ -155,17 +155,25 @@ public class AiEssenceBuilderService
 
     public AiEssenceBuilderService(
         ILlmProviderFactory providerFactory, UserAiKeyService keyService,
-        AuraDbContext db, ILogger<AiEssenceBuilderService> logger)
+        AuraDbContext db, IEssenceValidator validator, ILogger<AiEssenceBuilderService> logger)
     {
         _providerFactory = providerFactory;
         _keyService = keyService;
         _db = db;
+        _validator = validator;
         _logger = logger;
     }
 
     public async Task<GenerateEssenceResponse> GenerateAsync(
         Guid userId, GenerateEssenceRequest request, Guid tenantId, CancellationToken ct)
     {
+        // [Required] on the request already rejects blank prompts over HTTP; this guard covers
+        // direct callers of the service, where a blank prompt would still burn paid tokens.
+        // No param name here: ArgumentException appends "(Parameter ...)" to Message,
+        // which would leak into the client-facing error.
+        if (string.IsNullOrWhiteSpace(request.Prompt))
+            throw new ArgumentException("Prompt must not be blank.");
+
         var provider = _providerFactory.GetProvider(request.Provider);
 
         var apiKey = await _keyService.GetDecryptedKeyAsync(userId, request.Provider, ct)
@@ -187,69 +195,87 @@ public class AiEssenceBuilderService
         string? essenceJson = null;
         var iterations = 0;
         string? lastError = null;
+        string? providerError = null;
+        int? providerStatus = null;
 
-        for (var i = 0; i < MaxIterations; i++)
+        try
         {
-            iterations++;
-            var userPrompt = i == 0
-                ? request.Prompt
-                : $"The previous response was not valid JSON. Error: {lastError}\n\nPlease fix and return ONLY valid Aura Essence JSON.\n\nOriginal request: {request.Prompt}";
-
-            var llmRequest = new LlmRequest(systemPrompt, userPrompt, apiKey, request.Model);
-            var result = await provider.GenerateAsync(llmRequest, ct);
-
-            totalInputTokens += result.InputTokens;
-            totalOutputTokens += result.OutputTokens;
-            if (!string.IsNullOrEmpty(result.Model))
-                model = result.Model;
-
-            if (!result.Success)
-                throw new InvalidOperationException($"LLM provider error: {result.Error}");
-
-            // Try to extract JSON from the response (strip markdown fences if present)
-            var content = ExtractJson(result.Content);
-
-            // Validate JSON
-            try
+            for (var i = 0; i < MaxIterations; i++)
             {
-                using var doc = JsonDocument.Parse(content);
-                var root = doc.RootElement;
-                if (root.TryGetProperty("layers", out _))
+                iterations++;
+                var userPrompt = i == 0
+                    ? request.Prompt
+                    : $"The previous response was rejected. Error: {lastError}\n\nPlease fix and return ONLY valid Aura Essence JSON.\n\nOriginal request: {request.Prompt}";
+
+                var llmRequest = new LlmRequest(systemPrompt, userPrompt, apiKey, request.Model);
+                var result = await provider.GenerateAsync(llmRequest, ct);
+
+                totalInputTokens += result.InputTokens;
+                totalOutputTokens += result.OutputTokens;
+                if (!string.IsNullOrEmpty(result.Model))
+                    model = result.Model;
+
+                // Provider failures (HTTP error, timeout) are not retried: break so the
+                // usage recorded so far is still logged (#21).
+                if (!result.Success)
                 {
-                    essenceJson = content;
+                    providerError = result.Error ?? "unknown provider error";
+                    providerStatus = result.HttpStatus;
                     break;
                 }
-                lastError = "JSON is valid but missing 'layers' property";
-            }
-            catch (JsonException ex)
-            {
-                lastError = ex.Message;
+
+                // Try to extract JSON from the response (strip markdown fences if present)
+                var content = ExtractJson(result.Content);
+
+                var check = _validator.Validate(content, cloudProvider);
+                lastError = check.Error;
+                if (lastError is null)
+                {
+                    essenceJson = check.EssenceJson;
+                    break;
+                }
             }
         }
-
-        sw.Stop();
-
-        // Log usage for BOTH outcomes — tokens burned in failed iterations are paid
-        // usage and must be recorded, not lost when we throw (#21).
-        var log = new AiGenerationLog
+        finally
         {
-            TenantId = tenantId,
-            UserId = userId,
-            ProviderName = request.Provider,
-            Model = model,
-            Prompt = request.Prompt,
-            InputTokens = totalInputTokens,
-            OutputTokens = totalOutputTokens,
-            Iterations = iterations,
-            DurationMs = sw.ElapsedMilliseconds,
-            Success = essenceJson is not null
-        };
-        _db.Set<AiGenerationLog>().Add(log);
-        await _db.SaveChangesAsync(ct);
+            sw.Stop();
+
+            // Usage is paid for however the attempts end: a normal result, a provider failure,
+            // a client disconnect (ct is cancelled, so it must not reach SaveChanges), or any
+            // unexpected exception. Hence the finally and CancellationToken.None.
+            _db.Set<AiGenerationLog>().Add(new AiGenerationLog
+            {
+                TenantId = tenantId,
+                UserId = userId,
+                ProviderName = request.Provider,
+                Model = model,
+                Prompt = request.Prompt,
+                InputTokens = totalInputTokens,
+                OutputTokens = totalOutputTokens,
+                Iterations = iterations,
+                DurationMs = sw.ElapsedMilliseconds,
+                Success = essenceJson is not null
+            });
+            await _db.SaveChangesAsync(CancellationToken.None);
+        }
+
+        // Client-facing messages stay plain. Provider bodies and validator reasons go to the log.
+        if (providerError is not null)
+        {
+            _logger.LogWarning(
+                "AI essence generation failed at provider: provider={Provider}, iterations={Iter}, httpStatus={Status}, error={Error}",
+                request.Provider, iterations, providerStatus, providerError);
+            throw new InvalidOperationException(DescribeProviderFailure(providerStatus));
+        }
 
         if (essenceJson is null)
+        {
+            _logger.LogWarning(
+                "AI essence generation produced no valid essence: provider={Provider}, iterations={Iter}, lastError={Error}",
+                request.Provider, iterations, lastError);
             throw new InvalidOperationException(
-                $"Failed to generate valid essence JSON after {iterations} attempts. Last error: {lastError}");
+                $"The model returned an invalid essence after {iterations} attempts. Try rephrasing the prompt.");
+        }
 
         _logger.LogInformation(
             "AI essence generated: provider={Provider}, model={Model}, tokens={In}+{Out}, iterations={Iter}, duration={Ms}ms",
@@ -259,6 +285,15 @@ public class AiEssenceBuilderService
             essenceJson, totalInputTokens, totalOutputTokens,
             iterations, sw.ElapsedMilliseconds, model);
     }
+
+    // Client-facing text for a failed provider call. Status codes map to actionable wording;
+    // the provider's own error body stays in the server log.
+    internal static string DescribeProviderFailure(int? httpStatus) => httpStatus switch
+    {
+        401 or 403 => "The AI provider rejected the API key. Check the key in Account Settings.",
+        null => "The AI provider request failed. Try again.",
+        _ => $"The AI provider returned HTTP {httpStatus}. Try again later.",
+    };
 
     private static string ExtractJson(string content)
     {

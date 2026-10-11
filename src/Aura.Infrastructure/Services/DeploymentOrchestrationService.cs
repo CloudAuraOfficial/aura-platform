@@ -3,6 +3,7 @@ using System.Text.Json;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
 using Aura.Core.Interfaces;
+using Aura.Core.Operations;
 using Aura.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -56,6 +57,23 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         return run;
     }
 
+    /// <summary>
+    /// The layer-level operationType, read the same way for run creation and for essence validation.
+    /// Null when absent, null or empty. Throws when present but not a string, since the Worker would
+    /// otherwise read it as a different value. parameters.operationType is not read here: it is a
+    /// plain argument on script layers, and only operation and emissionload layers fall back to it.
+    /// </summary>
+    public static string? ReadLayerOperationType(string layerName, JsonElement layer)
+    {
+        if (!layer.TryGetProperty("operationType", out var prop) || prop.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (prop.ValueKind != JsonValueKind.String)
+            throw new InvalidEssenceException($"Layer '{layerName}': operationType must be a string.");
+
+        return string.IsNullOrEmpty(prop.GetString()) ? null : prop.GetString();
+    }
+
     internal static List<DeploymentLayer> ParseAndSortLayers(string snapshotJson, Guid runId)
     {
         using var doc = JsonDocument.Parse(snapshotJson);
@@ -79,9 +97,10 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 ? execProp.GetString() ?? ""
                 : "";
 
-            var operationType = val.TryGetProperty("operationType", out var opTypeProp)
-                ? opTypeProp.GetString()
-                : null;
+            // Canonical casing: the EmissionLoad entrypoints compare names case-sensitively.
+            var operationType = ReadLayerOperationType(name, val);
+            if (operationType is not null)
+                operationType = OperationTypes.Canonicalize(operationType) ?? operationType;
 
             ExecutorType executorType;
             if (!string.IsNullOrEmpty(operationType) && string.IsNullOrEmpty(executorTypeStr))
@@ -148,15 +167,19 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
             // #13: optional finally-semantics. Strict parse — runPolicy is a
             // safety property, so a typo must fail at run creation rather than
             // silently fall back to fail-stop and reintroduce orphaning.
+            // Names only: Enum.TryParse also accepts numeric text ("7", "0"), which would turn
+            // a typo into a real policy value. Enum.IsDefined alone still accepts "0" and "1".
             var runPolicy = RunPolicy.OnSuccess;
             if (val.TryGetProperty("runPolicy", out var rpProp))
             {
-                if (rpProp.ValueKind != JsonValueKind.String
-                    || !Enum.TryParse<RunPolicy>(rpProp.GetString(), ignoreCase: true, out runPolicy))
+                var policyText = rpProp.ValueKind == JsonValueKind.String ? rpProp.GetString() : null;
+                if (policyText is null
+                    || !Enum.GetNames<RunPolicy>().Contains(policyText, StringComparer.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException(
+                    throw new InvalidEssenceException(
                         $"Layer '{name}': unknown runPolicy '{rpProp}'. Valid values: onSuccess, always.");
                 }
+                runPolicy = Enum.Parse<RunPolicy>(policyText, ignoreCase: true);
             }
 
             definitions[name] = new LayerDefinition(name, executorType, parameters, scriptPath, dependsOn, operationType, cloudAccountId, runPolicy);
@@ -225,7 +248,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         }
 
         if (sorted.Count != definitions.Count)
-            throw new InvalidOperationException("Cycle detected in layer dependencies.");
+            throw new InvalidEssenceException("Cycle detected in layer dependencies.");
 
         return sorted;
     }
@@ -237,7 +260,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         "csharp_sdk" => ExecutorType.CSharpSdk,
         "operation" => ExecutorType.Operation,
         "emissionload" => ExecutorType.EmissionLoad,
-        _ => throw new InvalidOperationException($"Unknown executor type: {value}")
+        _ => throw new InvalidEssenceException($"Unknown executor type: {value}")
     };
 
     internal record LayerDefinition(

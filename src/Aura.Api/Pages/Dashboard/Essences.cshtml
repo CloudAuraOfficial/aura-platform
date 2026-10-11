@@ -666,25 +666,75 @@ document.getElementById('aiForm').addEventListener('submit', function(ev) {
     errEl.style.display = 'none';
     successEl.style.display = 'none';
     statsEl.style.display = 'none';
+
+    function showAiError(msg) {
+        errEl.textContent = msg;
+        errEl.style.display = 'block';
+    }
+
+    if (!accountId) {
+        showAiError('Add a cloud account before generating an essence.');
+        return;
+    }
+    if (!provider) {
+        showAiError('No AI provider is available.');
+        return;
+    }
+
     btn.disabled = true;
     btn.textContent = 'Generating...';
 
+    // Resolves with the response body, or rejects with a message written for the user.
+    async function requestEssence() {
+        var httpRes;
+        try {
+            httpRes = await fetch('/api/v1/essences/generate', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ prompt: prompt, cloudAccountId: accountId, provider: provider })
+            });
+        } catch (e) {
+            // Only reached when no response arrived at all.
+            throw new Error('Could not reach the server. Check your connection and try again.');
+        }
+
+        // Error bodies are {error, message, statusCode}. Read JSON only when the server says it is
+        // JSON, so an HTML error page from a proxy cannot turn into a parse error here.
+        var body = null;
+        if ((httpRes.headers.get('content-type') || '').indexOf('application/json') !== -1) {
+            try { body = await httpRes.json(); } catch (e) { body = null; }
+        }
+
+        if (httpRes.status === 401 || httpRes.status === 403) {
+            throw new Error('You do not have permission to generate essences. Sign in again or ask an admin for access.');
+        }
+        if (httpRes.status >= 500) {
+            throw new Error('The server hit an error while generating the essence. Try again in a moment.');
+        }
+        if (!httpRes.ok) {
+            throw new Error((body && body.message) || 'Essence generation failed. Try again.');
+        }
+        if (!body || !body.essenceJson) {
+            throw new Error('The server returned an unexpected response. Try again.');
+        }
+        return body;
+    }
+
     (async function() {
-        var res = await api('/api/v1/essences/generate', {
-            method: 'POST',
-            body: JSON.stringify({ prompt: prompt, cloudAccountId: accountId, provider: provider })
-        });
-
-        btn.disabled = false;
-        btn.textContent = 'Generate Essence';
-
-        if (!res) return;
-
-        if (res.error) {
-            errEl.textContent = res.message;
-            errEl.style.display = 'block';
+        var res;
+        try {
+            res = await requestEssence();
+        } catch (e) {
+            showAiError(e.message);
+            btn.disabled = false;
+            btn.textContent = 'Generate Essence';
             return;
         }
+
+        // Success: Generate stays disabled until the editor has opened. Re-enabling it here let a
+        // second paid generation start while "Opening editor..." was on screen. Reopening the
+        // modal resets the button (see the aiModal open handler).
+        btn.textContent = 'Generated';
 
         // Show stats
         var statsText = 'Tokens: ' + res.inputTokens + ' in / ' + res.outputTokens + ' out · ' +

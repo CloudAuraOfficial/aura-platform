@@ -26,5 +26,6 @@ public record LlmCompletionResult(
     int OutputTokens,
     string Model,
     bool Success,
-    string? Error = null
+    string? Error = null,
+    int? HttpStatus = null // set when the provider answered with a non-success HTTP status
 );

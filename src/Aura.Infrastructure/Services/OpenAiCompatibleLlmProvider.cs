@@ -33,7 +33,8 @@ public class OpenAiCompatibleLlmProvider : ILlmProvider
     public async Task<LlmCompletionResult> GenerateAsync(LlmRequest request, CancellationToken ct = default)
     {
         var model = request.Model ?? _defaultModel;
-        LlmCompletionResult Fail(string error) => new("", 0, 0, model, false, error);
+        LlmCompletionResult Fail(string error, int? httpStatus = null) =>
+            new("", 0, 0, model, false, error, httpStatus);
 
         var payload = new
         {
@@ -68,7 +69,8 @@ public class OpenAiCompatibleLlmProvider : ILlmProvider
 
             if (!response.IsSuccessStatusCode)
             {
-                return Fail($"{ProviderName} API error {(int)response.StatusCode}: {TruncateError(body)}");
+                return Fail($"{ProviderName} API error {(int)response.StatusCode}: {TruncateError(body)}",
+                    (int)response.StatusCode);
             }
         }
         catch (Exception ex) when (ex is HttpRequestException

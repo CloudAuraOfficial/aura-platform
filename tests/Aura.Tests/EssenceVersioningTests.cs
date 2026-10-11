@@ -8,8 +8,6 @@ namespace Aura.Tests;
 
 public class EssenceVersioningTests
 {
-    private sealed record FakeTenant(Guid TenantId) : ITenantContext;
-
     private static AuraDbContext CreateInMemoryDb()
     {
         var options = new DbContextOptionsBuilder<AuraDbContext>()

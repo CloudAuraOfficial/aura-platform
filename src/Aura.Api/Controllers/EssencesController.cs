@@ -9,6 +9,7 @@ using Aura.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Aura.Api.Controllers;
 
@@ -21,14 +22,18 @@ public class EssencesController : ControllerBase
     private readonly ITenantContext _tenant;
     private readonly IAuditService _audit;
     private readonly AiEssenceBuilderService _aiBuilder;
+    private readonly IEssenceValidator _validator;
+    private readonly ILogger<EssencesController> _logger;
 
     public EssencesController(AuraDbContext db, ITenantContext tenant, IAuditService audit,
-        AiEssenceBuilderService aiBuilder)
+        AiEssenceBuilderService aiBuilder, IEssenceValidator validator, ILogger<EssencesController> logger)
     {
         _db = db;
         _tenant = tenant;
         _audit = audit;
         _aiBuilder = aiBuilder;
+        _validator = validator;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -61,12 +66,16 @@ public class EssencesController : ControllerBase
         if (!accountExists)
             return BadRequest(new ErrorResponse("bad_request", "Cloud account not found.", 400));
 
+        var check = _validator.CheckOperationTypes(request.EssenceJson);
+        if (check.Error is not null)
+            return RejectInvalidOperationType(check.Error, "create");
+
         var essence = new Essence
         {
             TenantId = _tenant.TenantId,
             Name = request.Name,
             CloudAccountId = request.CloudAccountId,
-            EssenceJson = request.EssenceJson,
+            EssenceJson = check.EssenceJson,
             CurrentVersion = 1
         };
 
@@ -77,7 +86,7 @@ public class EssencesController : ControllerBase
         {
             EssenceId = essence.Id,
             VersionNumber = 1,
-            EssenceJson = request.EssenceJson,
+            EssenceJson = essence.EssenceJson,
             ChangedByUserId = GetCurrentUserId()
         });
 
@@ -96,6 +105,15 @@ public class EssencesController : ControllerBase
         if (essence is null)
             return NotFound(new ErrorResponse("not_found", "Essence not found.", 404));
 
+        var essenceJson = request.EssenceJson;
+        if (essenceJson is not null)
+        {
+            var check = _validator.CheckOperationTypes(essenceJson);
+            if (check.Error is not null)
+                return RejectInvalidOperationType(check.Error, "update");
+            essenceJson = check.EssenceJson;
+        }
+
         if (request.Name is not null)
             essence.Name = request.Name;
 
@@ -107,16 +125,16 @@ public class EssencesController : ControllerBase
             essence.CloudAccountId = request.CloudAccountId.Value;
         }
 
-        if (request.EssenceJson is not null)
+        if (essenceJson is not null)
         {
-            essence.EssenceJson = request.EssenceJson;
+            essence.EssenceJson = essenceJson;
             essence.CurrentVersion++;
 
             _db.EssenceVersions.Add(new EssenceVersion
             {
                 EssenceId = essence.Id,
                 VersionNumber = essence.CurrentVersion,
-                EssenceJson = request.EssenceJson,
+                EssenceJson = essenceJson,
                 ChangedByUserId = GetCurrentUserId()
             });
         }
@@ -271,12 +289,16 @@ public class EssencesController : ControllerBase
         if (source is null)
             return NotFound(new ErrorResponse("not_found", "Essence not found.", 404));
 
+        var check = _validator.CheckOperationTypes(source.EssenceJson);
+        if (check.Error is not null)
+            return RejectInvalidOperationType(check.Error, "clone");
+
         var clone = new Essence
         {
             TenantId = _tenant.TenantId,
             Name = request.Name,
             CloudAccountId = source.CloudAccountId,
-            EssenceJson = source.EssenceJson,
+            EssenceJson = check.EssenceJson,
             CurrentVersion = 1
         };
 
@@ -286,7 +308,7 @@ public class EssencesController : ControllerBase
         {
             EssenceId = clone.Id,
             VersionNumber = 1,
-            EssenceJson = source.EssenceJson,
+            EssenceJson = check.EssenceJson,
             ChangedByUserId = GetCurrentUserId()
         });
 
@@ -340,6 +362,16 @@ public class EssencesController : ControllerBase
         await _audit.LogAsync(_tenant.TenantId, GetCurrentUserId(), "delete", "Essence", id);
 
         return NoContent();
+    }
+
+    // Standard 400 when essence JSON names an operationType the Worker cannot run. The reason
+    // names the layer and type, so it is safe to return; it is also logged for operators.
+    private IActionResult RejectInvalidOperationType(string reason, string action)
+    {
+        _logger.LogWarning(
+            "Essence {Action} rejected: tenant={TenantId}, user={UserId}, reason={Reason}",
+            action, _tenant.TenantId, GetCurrentUserId(), reason);
+        return BadRequest(new ErrorResponse("bad_request", reason, 400));
     }
 
     private Guid GetCurrentUserId()
