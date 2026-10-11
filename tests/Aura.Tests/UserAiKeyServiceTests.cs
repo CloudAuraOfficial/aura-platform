@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+using static Aura.Tests.SecretTestFixtures;
 
 namespace Aura.Tests;
 
@@ -26,7 +27,7 @@ public class UserAiKeyServiceTests
         // Identity crypto — we only care about lookup, not encryption here.
         var crypto = new Mock<ICryptoService>();
         crypto.Setup(c => c.Decrypt(It.IsAny<string>())).Returns<string>(s => s);
-        return new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
+        return new UserAiKeyService(db, StoredSecrets(db, crypto.Object), Mock.Of<ILogger<UserAiKeyService>>());
     }
 
     private static async Task<Guid> SeedProvider(AuraDbContext db, string storedName, string ciphertext = "sk-secret")
@@ -82,7 +83,7 @@ public class UserAiKeyServiceTests
         var crypto = new Mock<ICryptoService>();
         crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
             .Throws(StoredSecretUnreadableException.FromCryptoFailure(inner));
-        var svc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
+        var svc = new UserAiKeyService(db, StoredSecrets(db, crypto.Object), Mock.Of<ILogger<UserAiKeyService>>());
 
         var ex = await Assert.ThrowsAsync<StoredSecretUnreadableException>(() =>
             svc.GetDecryptedKeyAsync(userId, "OpenRouter"));
@@ -101,7 +102,7 @@ public class UserAiKeyServiceTests
         var userId = await SeedProvider(db, "openrouter");
         var crypto = new Mock<ICryptoService>();
         crypto.Setup(c => c.Decrypt(It.IsAny<string>())).Throws(new CryptographicException());
-        var svc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
+        var svc = new UserAiKeyService(db, StoredSecrets(db, crypto.Object), Mock.Of<ILogger<UserAiKeyService>>());
 
         await Assert.ThrowsAsync<CryptographicException>(() =>
             svc.GetDecryptedKeyAsync(userId, "openrouter"));
@@ -119,7 +120,7 @@ public class UserAiKeyServiceTests
             .Throws(StoredSecretUnreadableException.FromCryptoFailure(
                 new CryptographicException($"padding is invalid; value was {ciphertext}")));
         var logger = new Mock<ILogger<UserAiKeyService>>();
-        var svc = new UserAiKeyService(db, crypto.Object, logger.Object);
+        var svc = new UserAiKeyService(db, StoredSecrets(db, crypto.Object), logger.Object);
 
         var ex = await Assert.ThrowsAsync<StoredSecretUnreadableException>(() =>
             svc.GetDecryptedKeyAsync(userId, "openrouter"));
@@ -158,7 +159,7 @@ public class UserAiKeyServiceTests
         var userId = await SeedProvider(db, "openai");
         var crypto = new Mock<ICryptoService>();
         var logger = new Mock<ILogger<UserAiKeyService>>();
-        var svc = new UserAiKeyService(db, crypto.Object, logger.Object);
+        var svc = new UserAiKeyService(db, StoredSecrets(db, crypto.Object), logger.Object);
 
         Assert.Null(await svc.GetDecryptedKeyAsync(userId, "anthropic"));
 

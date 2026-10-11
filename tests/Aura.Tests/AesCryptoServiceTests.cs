@@ -2,18 +2,12 @@ using System.Security.Cryptography;
 using Aura.Core.Exceptions;
 using Aura.Infrastructure.Services;
 using Xunit;
+using static Aura.Tests.SecretTestFixtures;
 
 namespace Aura.Tests;
 
 public class AesCryptoServiceTests
 {
-    private static readonly string Key = Convert.ToBase64String(Enumerable.Range(1, 32).Select(i => (byte)i).ToArray());
-
-    // Produced by the pre-#45 AES-256-CBC implementation (openssl enc -aes-256-cbc, key = bytes 1..32,
-    // IV = 00 11 .. ff, PKCS7), stored as base64(IV | ciphertext). Plaintext: "sk-legacy-cbc-456".
-    private const string LegacyCbcValue = "ABEiM0RVZneImaq7zN3u/84hAm9he171SbwDijRUtv6tsvTwTEs1I5PSbdos/wTe";
-    private const string LegacyCbcPlainText = "sk-legacy-cbc-456";
-
     [Fact]
     public void Decrypt_round_trips_a_value_encrypted_with_the_same_key()
     {
@@ -183,6 +177,26 @@ public class AesCryptoServiceTests
         var ex = Assert.Throws<StoredSecretUnreadableException>(() => crypto.Decrypt(malformed));
 
         Assert.DoesNotContain(malformed, ex.Message);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void Decrypt_maps_a_null_or_empty_value_to_the_typed_exception(string? stored)
+    {
+        var crypto = new AesCryptoService(Key);
+
+        Assert.Throws<StoredSecretUnreadableException>(() => crypto.Decrypt(stored!));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    public void IsLegacyFormat_is_false_for_a_null_or_empty_value(string? stored)
+    {
+        var crypto = new AesCryptoService(Key);
+
+        Assert.False(crypto.IsLegacyFormat(stored!));
     }
 
     [Fact]

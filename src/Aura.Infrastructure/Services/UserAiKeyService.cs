@@ -1,6 +1,5 @@
 using Aura.Core.Entities;
 using Aura.Core.Exceptions;
-using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -10,13 +9,13 @@ namespace Aura.Infrastructure.Services;
 public class UserAiKeyService
 {
     private readonly AuraDbContext _db;
-    private readonly ICryptoService _crypto;
+    private readonly StoredSecretService _secrets;
     private readonly ILogger<UserAiKeyService> _logger;
 
-    public UserAiKeyService(AuraDbContext db, ICryptoService crypto, ILogger<UserAiKeyService> logger)
+    public UserAiKeyService(AuraDbContext db, StoredSecretService secrets, ILogger<UserAiKeyService> logger)
     {
         _db = db;
-        _crypto = crypto;
+        _secrets = secrets;
         _logger = logger;
     }
 
@@ -33,10 +32,11 @@ public class UserAiKeyService
         if (provider is null || string.IsNullOrEmpty(provider.EncryptedApiKey))
             return null;
 
-        string plainText;
         try
         {
-            plainText = _crypto.Decrypt(provider.EncryptedApiKey);
+            // Decrypts, and re-encrypts a legacy row to v2 when the upgrade gate is open (StoredSecretService).
+            return await _secrets.ReadAsync<UserAiProvider>(
+                provider.Id, nameof(UserAiProvider.EncryptedApiKey), provider.EncryptedApiKey, ct);
         }
         catch (StoredSecretUnreadableException ex)
         {
@@ -46,32 +46,6 @@ public class UserAiKeyService
                 userId, normalized, ex.InnerException?.GetType().Name ?? nameof(StoredSecretUnreadableException));
             // Name the provider as the caller selected it, so the message matches what the user picked.
             throw StoredSecretUnreadableException.ForProviderKey(providerName, ex);
-        }
-
-        await UpgradeLegacyCiphertextAsync(provider, plainText, ct);
-        return plainText;
-    }
-
-    // Re-encrypts a legacy row to the current format after a successful read. Best effort: a failed
-    // save must not fail the read, because the legacy value still decrypts. UpdatedAt is left alone
-    // because it is shown to the user as "when I last changed this key".
-    private async Task UpgradeLegacyCiphertextAsync(UserAiProvider provider, string plainText, CancellationToken ct)
-    {
-        if (!_crypto.IsLegacyFormat(provider.EncryptedApiKey))
-            return;
-
-        try
-        {
-            provider.EncryptedApiKey = _crypto.Encrypt(plainText);
-            await _db.SaveChangesAsync(ct);
-            _logger.LogInformation("Re-encrypted legacy AI provider key: user={UserId}, provider={Provider}",
-                provider.UserId, provider.ProviderName);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogWarning(
-                "Could not re-encrypt legacy AI provider key: user={UserId}, provider={Provider}, error={ErrorType}",
-                provider.UserId, provider.ProviderName, ex.GetType().Name);
         }
     }
 }

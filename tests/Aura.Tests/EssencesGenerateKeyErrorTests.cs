@@ -16,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+using static Aura.Tests.SecretTestFixtures;
 
 namespace Aura.Tests;
 
@@ -31,7 +32,7 @@ public class EssencesGenerateKeyErrorTests
 
     private static EssencesController Controller(AuraDbContext db, Guid userId, Mock<ICryptoService> crypto)
     {
-        var keySvc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
+        var keySvc = new UserAiKeyService(db, StoredSecrets(db, crypto.Object), Mock.Of<ILogger<UserAiKeyService>>());
         var providers = new Mock<ILlmProviderFactory>();
         providers.Setup(f => f.SupportedProviders).Returns(new[] { "openrouter" });
         var aiBuilder = new AiEssenceBuilderService(

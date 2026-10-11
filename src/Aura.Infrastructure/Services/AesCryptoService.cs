@@ -52,6 +52,9 @@ public class AesCryptoService : ICryptoService
 
     public string Decrypt(string cipherText)
     {
+        if (string.IsNullOrEmpty(cipherText))
+            throw StoredSecretUnreadableException.FromCryptoFailure(new ArgumentException("Stored value is empty."));
+
         try
         {
             return DecryptOrThrow(cipherText);
@@ -64,7 +67,8 @@ public class AesCryptoService : ICryptoService
     }
 
     /// <inheritdoc />
-    public bool IsLegacyFormat(string cipherText) => !cipherText.Contains(':');
+    public bool IsLegacyFormat(string cipherText) =>
+        !string.IsNullOrEmpty(cipherText) && !cipherText.Contains(':');
 
     private string DecryptOrThrow(string cipherText)
     {
