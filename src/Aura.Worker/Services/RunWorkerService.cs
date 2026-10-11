@@ -211,9 +211,10 @@ public class RunWorkerService : BackgroundService
         // when one of its own dependsOn ancestors that is itself Always did not
         // succeed (its cleanup would fail anyway, e.g. DeleteVpc behind a
         // failed EC2 termination). Dependencies on non-Always layers are
-        // ordering-only. Cancellation is unchanged: a user cancel aborts
-        // cleanup layers too.
+        // ordering-only. #52: a user cancel is observed between layers. It
+        // skips the remaining OnSuccess layers but Always layers still run.
         var failed = false;
+        var cancelled = false;
         var alwaysLayers = run.Layers
             .Where(l => l.RunPolicy == RunPolicy.Always)
             .Select(l => l.LayerName)
@@ -221,7 +222,15 @@ public class RunWorkerService : BackgroundService
         var outcomes = new Dictionary<string, LayerStatus>();
         foreach (var layer in run.Layers.OrderBy(l => l.SortOrder))
         {
-            var skipReason = ComputeSkipReason(layer, failed, alwaysLayers, outcomes);
+            if (!cancelled && await IsRunCancelledAsync(db, runId, ct))
+            {
+                cancelled = true;
+                _logger.LogWarning("Run {RunId} cancelled by user; running only RunPolicy.Always layers", runId);
+                await PublishLogSafe(logStream, runId,
+                    "Run cancelled by user: skipping remaining layers, running cleanup", ct);
+            }
+
+            var skipReason = ComputeSkipReason(layer, failed, alwaysLayers, outcomes, cancelled);
             if (skipReason is not null)
             {
                 layer.Status = LayerStatus.Skipped;
@@ -333,7 +342,15 @@ public class RunWorkerService : BackgroundService
             await db.SaveChangesAsync(ct);
         }
 
-        run.Status = failed ? RunStatus.Failed : RunStatus.Succeeded;
+        // Reload before the final save: a cancel that landed mid-run bumped the
+        // xmin concurrency token, so saving the stale entity would throw. The
+        // run has no unsaved changes at this point, so the reload is lossless.
+        await db.Entry(run).ReloadAsync(ct);
+        cancelled |= run.Status == RunStatus.Cancelled;
+
+        run.Status = cancelled ? RunStatus.Cancelled
+            : failed ? RunStatus.Failed
+            : RunStatus.Succeeded;
         run.CompletedAt = DateTime.UtcNow;
         activity?.SetTag("deployment.status", run.Status.ToString());
         if (failed)
@@ -396,12 +413,15 @@ public class RunWorkerService : BackgroundService
     /// dependsOn ancestors that is itself Always did not succeed — its cleanup
     /// would fail anyway (e.g. DeleteVpc behind a failed EC2 termination).
     /// Returns the skip reason, or null when the layer should execute.
+    /// A user cancel (#52) skips OnSuccess layers but not Always layers, so
+    /// teardown still runs for resources a cancelled run already created.
     /// </summary>
     internal static string? ComputeSkipReason(
         DeploymentLayer layer,
         bool failed,
         HashSet<string> alwaysLayers,
-        Dictionary<string, LayerStatus> outcomes)
+        Dictionary<string, LayerStatus> outcomes,
+        bool cancelled = false)
     {
         if (layer.RunPolicy == RunPolicy.Always)
         {
@@ -413,8 +433,23 @@ public class RunWorkerService : BackgroundService
             return blockedBy is null ? null : $"cleanup dependency '{blockedBy}' did not succeed";
         }
 
+        if (cancelled)
+            return "cancelled by user";
+
         return failed ? "previous layer failed" : null;
     }
+
+    /// <summary>
+    /// #52: reads the run's persisted status so a user cancel (set by the API)
+    /// is seen between layers. Untracked, so it never disturbs the run entity.
+    /// </summary>
+    private static Task<bool> IsRunCancelledAsync(AuraDbContext db, Guid runId, CancellationToken ct) =>
+        db.DeploymentRuns
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(r => r.Id == runId)
+            .Select(r => r.Status == RunStatus.Cancelled)
+            .FirstOrDefaultAsync(ct);
 
     private async Task PublishLogSafe(ILogStreamService logStream, Guid runId, string message, CancellationToken ct)
     {
