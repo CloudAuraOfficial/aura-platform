@@ -70,6 +70,24 @@ public sealed class EssenceValidator : IEssenceValidator
         }
     }
 
+    public EssenceCheck CheckRunnable(string essenceJson)
+    {
+        try
+        {
+            DeploymentOrchestrationService.ParseAndSortLayers(essenceJson, Guid.Empty);
+        }
+        catch (JsonException)
+        {
+            return Reject(essenceJson, "Essence JSON is not valid.");
+        }
+        catch (Exception ex)
+        {
+            return Reject(essenceJson, ex.Message);
+        }
+
+        return CheckOperationTypes(essenceJson);
+    }
+
     private static EssenceCheck Reject(string essenceJson, string reason) => new(essenceJson, reason);
 
     private static EssenceCheck Finish(string essenceJson, Outcome outcome)

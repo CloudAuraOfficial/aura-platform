@@ -383,4 +383,84 @@ public class EssenceValidatorTests
         Assert.Null(check.Error);
         Assert.Equal("not json", check.EssenceJson);
     }
+
+    // ---- deployment validation: the parser run creation uses, plus the save path's operation-type checks ----
+
+    [Fact]
+    public void CheckRunnable_accepts_an_essence_run_creation_can_use()
+    {
+        Assert.Null(Validator.CheckRunnable(Essence(KnownLayer)).Error);
+    }
+
+    [Fact]
+    public void CheckRunnable_accepts_a_mixed_cloud_essence_because_save_does()
+    {
+        // Save accepts layers from several clouds, so validation must not reject what save stored.
+        var json = Essence($"{KnownLayer}, {Layer("ec2", "CreateEc2Instance")}");
+
+        Assert.Null(Validator.CheckRunnable(json).Error);
+        Assert.Null(Validator.CheckOperationTypes(json).Error);
+    }
+
+    [Fact]
+    public void CheckRunnable_reports_a_dependency_cycle_the_parser_rejects()
+    {
+        var json = Essence(
+            "\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"b\"] }, " +
+            "\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"a\"] }");
+
+        var reason = Validator.CheckRunnable(json).Error;
+
+        Assert.Equal("Cycle detected in layer dependencies.", reason);
+    }
+
+    [Fact]
+    public void CheckRunnable_reports_an_unknown_run_policy_the_parser_rejects()
+    {
+        var json = Essence("\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"runPolicy\": \"sometimes\", \"parameters\": {}, \"dependsOn\": [] }");
+
+        Assert.Contains("unknown runPolicy", Validator.CheckRunnable(json).Error);
+    }
+
+    [Fact]
+    public void CheckRunnable_reports_an_unknown_operation_type_and_names_the_layer()
+    {
+        var reason = Validator.CheckRunnable(Essence(Layer("x", "Nope"))).Error;
+
+        Assert.NotNull(reason);
+        Assert.Contains("Unknown operationType", reason);
+        Assert.Contains("layer 'x' uses 'Nope'", reason);
+    }
+
+    [Fact]
+    public void CheckRunnable_reports_an_emissionload_type_its_container_cannot_run()
+    {
+        var json = Essence(Layer("net", "CreateVirtualNetwork", executorType: "emissionload"));
+
+        var reason = Validator.CheckRunnable(json).Error;
+
+        Assert.NotNull(reason);
+        Assert.Contains("layer 'net' uses 'CreateVirtualNetwork'", reason);
+    }
+
+    [Fact]
+    public void CheckRunnable_reports_malformed_json_without_parser_internals()
+    {
+        Assert.Equal("Essence JSON is not valid.", Validator.CheckRunnable("{ not json").Error);
+    }
+
+    [Fact]
+    public void CheckRunnable_rejects_a_non_object_root()
+    {
+        Assert.NotNull(Validator.CheckRunnable("[]").Error);
+    }
+
+    [Fact]
+    public void CheckRunnable_returns_the_canonical_casing_the_save_path_stores()
+    {
+        var check = Validator.CheckRunnable(Essence(Layer("rg", "createresourcegroup")));
+
+        Assert.Null(check.Error);
+        Assert.Equal("CreateResourceGroup", StoredOperationType(check.EssenceJson, "rg"));
+    }
 }
