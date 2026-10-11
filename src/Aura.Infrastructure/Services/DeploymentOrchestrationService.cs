@@ -226,6 +226,9 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         {
             foreach (var dep in def.DependsOn)
             {
+                // A dependency on a disabled or missing layer would otherwise surface as a KeyNotFoundException.
+                if (!adjacency.ContainsKey(dep))
+                    throw new InvalidEssenceException($"Layer '{name}' depends on '{dep}', which is missing or disabled.");
                 adjacency[dep].Add(name);
                 inDegree[name]++;
             }

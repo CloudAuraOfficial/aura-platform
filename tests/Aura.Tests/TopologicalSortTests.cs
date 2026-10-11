@@ -96,4 +96,17 @@ public class TopologicalSortTests
             new Dictionary<string, DeploymentOrchestrationService.LayerDefinition>());
         Assert.Empty(sorted);
     }
+
+    [Fact]
+    public void DependencyOnMissingLayer_ThrowsInvalidEssence_NotAKeyNotFound()
+    {
+        var defs = new Dictionary<string, DeploymentOrchestrationService.LayerDefinition>
+        {
+            ["A"] = new("A", ExecutorType.PowerShell, "{}", null, ["ghost"])
+        };
+
+        var ex = Assert.Throws<InvalidEssenceException>(() => DeploymentOrchestrationService.TopologicalSort(defs));
+
+        Assert.Equal("Layer 'A' depends on 'ghost', which is missing or disabled.", ex.Message);
+    }
 }
