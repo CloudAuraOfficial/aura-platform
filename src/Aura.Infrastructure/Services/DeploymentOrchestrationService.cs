@@ -3,6 +3,7 @@ using System.Text.Json;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
 using Aura.Core.Interfaces;
+using Aura.Core.Operations;
 using Aura.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -56,6 +57,23 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         return run;
     }
 
+    /// <summary>
+    /// The layer-level operationType, read the same way for run creation and for essence validation.
+    /// Null when absent, null or empty. Throws when present but not a string, since the Worker would
+    /// otherwise read it as a different value. parameters.operationType is not read here: it is a
+    /// plain argument on script layers, and only operation and emissionload layers fall back to it.
+    /// </summary>
+    public static string? ReadLayerOperationType(string layerName, JsonElement layer)
+    {
+        if (!layer.TryGetProperty("operationType", out var prop) || prop.ValueKind == JsonValueKind.Null)
+            return null;
+
+        if (prop.ValueKind != JsonValueKind.String)
+            throw new InvalidOperationException($"Layer '{layerName}': operationType must be a string.");
+
+        return string.IsNullOrEmpty(prop.GetString()) ? null : prop.GetString();
+    }
+
     internal static List<DeploymentLayer> ParseAndSortLayers(string snapshotJson, Guid runId)
     {
         using var doc = JsonDocument.Parse(snapshotJson);
@@ -79,9 +97,10 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 ? execProp.GetString() ?? ""
                 : "";
 
-            var operationType = val.TryGetProperty("operationType", out var opTypeProp)
-                ? opTypeProp.GetString()
-                : null;
+            // Canonical casing: the EmissionLoad entrypoints compare names case-sensitively.
+            var operationType = ReadLayerOperationType(name, val);
+            if (operationType is not null)
+                operationType = OperationTypes.Canonicalize(operationType) ?? operationType;
 
             ExecutorType executorType;
             if (!string.IsNullOrEmpty(operationType) && string.IsNullOrEmpty(executorTypeStr))

@@ -61,6 +61,7 @@ public class AiEssenceBuilderServiceTests
         var keySvc = new UserAiKeyService(db, crypto.Object);
         var svc = new AiEssenceBuilderService(
             new StubFactory(new TokenBurningProvider()), keySvc, db,
+            new EssenceValidator(),
             Mock.Of<ILogger<AiEssenceBuilderService>>());
         return (svc, db, userId, tenantId, cloudId);
     }

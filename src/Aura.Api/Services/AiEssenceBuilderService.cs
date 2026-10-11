@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
@@ -15,11 +14,12 @@ public class AiEssenceBuilderService
     private readonly ILlmProviderFactory _providerFactory;
     private readonly UserAiKeyService _keyService;
     private readonly AuraDbContext _db;
+    private readonly IEssenceValidator _validator;
     private readonly ILogger<AiEssenceBuilderService> _logger;
 
     private const int MaxIterations = 3;
 
-    private const string AzureSystemPrompt = """
+    internal const string AzureSystemPrompt = """
         You are an infrastructure-as-code expert for the Aura Platform. Your job is to generate a valid Aura Essence JSON definition based on the user's natural language description.
 
         An Essence JSON has this structure:
@@ -63,7 +63,7 @@ public class AiEssenceBuilderService
     // Placeholder until Epic 1 lands the AWS handler set. Operation list is the
     // intended target surface; the model can use it to scaffold reasonable JSON
     // even before the handlers exist.
-    private const string AwsSystemPrompt = """
+    internal const string AwsSystemPrompt = """
         You are an infrastructure-as-code expert for the Aura Platform. Your job is to generate a valid Aura Essence JSON definition for AWS based on the user's natural language description.
 
         An Essence JSON has this structure:
@@ -105,7 +105,7 @@ public class AiEssenceBuilderService
         """;
 
     // Placeholder until Epic 2 lands the GCP handler set.
-    private const string GcpSystemPrompt = """
+    internal const string GcpSystemPrompt = """
         You are an infrastructure-as-code expert for the Aura Platform. Your job is to generate a valid Aura Essence JSON definition for Google Cloud based on the user's natural language description.
 
         An Essence JSON has this structure:
@@ -131,7 +131,7 @@ public class AiEssenceBuilderService
           }
         }
 
-        Target GCP operation types (handlers land in Epic 2): CreateNetwork, DeleteNetwork, CreateGceInstance, StartGceInstance, StopGceInstance, DeleteGceInstance, CreateGcsBucket, DeleteGcsBucket, DeployCloudRunService, DeployDeploymentManager, CreateServiceAccount, CreateFirewallRule, HttpHealthCheck
+        Target GCP operation types (handlers land in Epic 2): CreateNetwork, DeleteNetwork, CreateGceInstance, StartGceInstance, StopGceInstance, DeleteGceInstance, CreateGcsBucket, DeleteGcsBucket, DeployCloudRunService, CreateServiceAccount, CreateFirewallRule, HttpHealthCheck
 
         Common GCE parameters: { "machineType": "e2-small", "zone": "us-east1-b", "sourceImage": "projects/debian-cloud/global/images/family/debian-12", "network": "default", "tags": [...] }
 
@@ -155,11 +155,12 @@ public class AiEssenceBuilderService
 
     public AiEssenceBuilderService(
         ILlmProviderFactory providerFactory, UserAiKeyService keyService,
-        AuraDbContext db, ILogger<AiEssenceBuilderService> logger)
+        AuraDbContext db, IEssenceValidator validator, ILogger<AiEssenceBuilderService> logger)
     {
         _providerFactory = providerFactory;
         _keyService = keyService;
         _db = db;
+        _validator = validator;
         _logger = logger;
     }
 
@@ -226,10 +227,11 @@ public class AiEssenceBuilderService
                 // Try to extract JSON from the response (strip markdown fences if present)
                 var content = ExtractJson(result.Content);
 
-                lastError = ValidateEssenceJson(content);
+                var check = _validator.Validate(content, cloudProvider);
+                lastError = check.Error;
                 if (lastError is null)
                 {
-                    essenceJson = content;
+                    essenceJson = check.EssenceJson;
                     break;
                 }
             }
@@ -292,41 +294,6 @@ public class AiEssenceBuilderService
         null => "The AI provider request failed. Try again.",
         _ => $"The AI provider returned HTTP {httpStatus}. Try again later.",
     };
-
-    // Returns null when the model output is a runnable essence, otherwise a short reason
-    // (fed back to the model on retry). Uses the same parser deployments use, so an essence
-    // we return is one a run can actually be created from: a cycle, an unknown runPolicy or
-    // executor, or an empty layer set would otherwise only fail later, at run creation.
-    // Any parser exception counts as an invalid output. Letting one escape would skip the
-    // retry loop and the usage row.
-    internal static string? ValidateEssenceJson(
-        string content, Func<string, List<DeploymentLayer>>? parse = null)
-    {
-        parse ??= json => DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.Empty);
-
-        try
-        {
-            using var doc = JsonDocument.Parse(content);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object)
-                return "response is valid JSON but not an object";
-            if (!doc.RootElement.TryGetProperty("layers", out _))
-                return "JSON is valid but missing 'layers' property";
-        }
-        catch (JsonException ex)
-        {
-            return ex.Message;
-        }
-
-        try
-        {
-            var layers = parse(content);
-            return layers.Count == 0 ? "essence has no enabled layers" : null;
-        }
-        catch (Exception ex)
-        {
-            return ex.Message;
-        }
-    }
 
     private static string ExtractJson(string content)
     {

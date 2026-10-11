@@ -4,10 +4,6 @@ using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
 using Aura.Worker.Executors;
 using Aura.Worker.Operations;
-using Aura.Worker.Operations.Azure;
-using Aura.Worker.Operations.Aws;
-using Aura.Worker.Operations.Gcp;
-using Aura.Worker.Operations.Common;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -60,94 +56,10 @@ builder.ConfigureServices((context, services) =>
     services.AddSingleton<IContainerExecutionService, DockerContainerExecutionService>();
     services.AddScoped<EmissionLoadResolver>();
 
-    // Operation handlers
-    services.AddTransient<CreateResourceGroupHandler>();
-    services.AddTransient<CreateContainerRegistryHandler>();
-    services.AddTransient<BuildContainerImageHandler>();
-    services.AddTransient<PushContainerImageHandler>();
-    services.AddTransient<ImportContainerImageHandler>();
-    services.AddTransient<CreateContainerGroupHandler>();
-    services.AddTransient<StopContainerGroupHandler>();
-    services.AddTransient<DeleteContainerGroupHandler>();
-    services.AddTransient<HttpHealthCheckHandler>();
-    services.AddTransient<CreateVMHandler>();
-    services.AddTransient<StartVMHandler>();
-    services.AddTransient<StopVMHandler>();
-    services.AddTransient<DeleteVMHandler>();
-    services.AddTransient<CreateVirtualNetworkHandler>();
-    services.AddTransient<DeleteVirtualNetworkHandler>();
-    services.AddTransient<DeployArmTemplateHandler>();
-    services.AddTransient<DeleteResourceGroupHandler>();
-
-    // AWS handlers (Epic 1)
-    services.AddTransient<CreateVpcHandler>();
-    services.AddTransient<DeleteVpcHandler>();
-    services.AddTransient<CreateEc2InstanceHandler>();
-    services.AddTransient<StartEc2InstanceHandler>();
-    services.AddTransient<StopEc2InstanceHandler>();
-    services.AddTransient<TerminateEc2InstanceHandler>();
-    services.AddTransient<CreateS3BucketHandler>();
-    services.AddTransient<DeleteS3BucketHandler>();
-    services.AddTransient<RunEcsTaskHandler>();
-
-    // GCP handlers (Epic 2)
-    services.AddTransient<CreateNetworkHandler>();
-    services.AddTransient<DeleteNetworkHandler>();
-    services.AddTransient<CreateGceInstanceHandler>();
-    services.AddTransient<StartGceInstanceHandler>();
-    services.AddTransient<StopGceInstanceHandler>();
-    services.AddTransient<DeleteGceInstanceHandler>();
-    services.AddTransient<CreateGcsBucketHandler>();
-    services.AddTransient<DeleteGcsBucketHandler>();
-    services.AddTransient<CreateFirewallRuleHandler>();
-    services.AddTransient<DeployCloudRunServiceHandler>();
-    services.AddTransient<CreateServiceAccountHandler>();
-    services.AddTransient<DeployCloudFormationHandler>();
-    services.AddTransient<CreateIamRoleHandler>();
-
     services.AddHttpClient();
 
     // Operation registry
-    var registry = new OperationRegistry();
-    registry.Register<CreateResourceGroupHandler>("CreateResourceGroup");
-    registry.Register<CreateContainerRegistryHandler>("CreateContainerRegistry");
-    registry.Register<BuildContainerImageHandler>("BuildContainerImage");
-    registry.Register<PushContainerImageHandler>("PushContainerImage");
-    registry.Register<ImportContainerImageHandler>("ImportContainerImage");
-    registry.Register<CreateContainerGroupHandler>("CreateContainerGroup");
-    registry.Register<StopContainerGroupHandler>("StopContainerGroup");
-    registry.Register<DeleteContainerGroupHandler>("DeleteContainerGroup");
-    registry.Register<HttpHealthCheckHandler>("HttpHealthCheck");
-    registry.Register<CreateVMHandler>("CreateVM");
-    registry.Register<StartVMHandler>("StartVM");
-    registry.Register<StopVMHandler>("StopVM");
-    registry.Register<DeleteVMHandler>("DeleteVM");
-    registry.Register<CreateVirtualNetworkHandler>("CreateVirtualNetwork");
-    registry.Register<DeleteVirtualNetworkHandler>("DeleteVirtualNetwork");
-    registry.Register<DeployArmTemplateHandler>("DeployArmTemplate");
-    registry.Register<DeleteResourceGroupHandler>("DeleteResourceGroup");
-    registry.Register<CreateVpcHandler>("CreateVpc");
-    registry.Register<DeleteVpcHandler>("DeleteVpc");
-    registry.Register<CreateEc2InstanceHandler>("CreateEc2Instance");
-    registry.Register<StartEc2InstanceHandler>("StartEc2Instance");
-    registry.Register<StopEc2InstanceHandler>("StopEc2Instance");
-    registry.Register<TerminateEc2InstanceHandler>("TerminateEc2Instance");
-    registry.Register<CreateS3BucketHandler>("CreateS3Bucket");
-    registry.Register<DeleteS3BucketHandler>("DeleteS3Bucket");
-    registry.Register<RunEcsTaskHandler>("RunEcsTask");
-    registry.Register<DeployCloudFormationHandler>("DeployCloudFormation");
-    registry.Register<CreateIamRoleHandler>("CreateIamRole");
-    registry.Register<CreateNetworkHandler>("CreateNetwork");
-    registry.Register<DeleteNetworkHandler>("DeleteNetwork");
-    registry.Register<CreateGceInstanceHandler>("CreateGceInstance");
-    registry.Register<StartGceInstanceHandler>("StartGceInstance");
-    registry.Register<StopGceInstanceHandler>("StopGceInstance");
-    registry.Register<DeleteGceInstanceHandler>("DeleteGceInstance");
-    registry.Register<CreateGcsBucketHandler>("CreateGcsBucket");
-    registry.Register<DeleteGcsBucketHandler>("DeleteGcsBucket");
-    registry.Register<CreateFirewallRuleHandler>("CreateFirewallRule");
-    registry.Register<DeployCloudRunServiceHandler>("DeployCloudRunService");
-    registry.Register<CreateServiceAccountHandler>("CreateServiceAccount");
+    var registry = OperationRegistry.CreateDefault(services);
     services.AddSingleton(registry);
 
     // Execution mode strategy (with in-process handler awareness)
