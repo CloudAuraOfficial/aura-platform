@@ -13,8 +13,6 @@ namespace Aura.Tests;
 
 public class DeploymentValidateEndpointTests
 {
-    private sealed record FakeTenant(Guid TenantId) : ITenantContext;
-
     private static (DeploymentsController controller, AuraDbContext db) CreateController(
         Guid tenantId, IDeploymentValidationService validation)
     {
