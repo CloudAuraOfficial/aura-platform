@@ -3,6 +3,7 @@ using Aura.Api.Middleware;
 using Aura.Api.Services;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
+using Aura.Core.Exceptions;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -314,6 +315,10 @@ public class EssencesController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(new ErrorResponse("bad_request", ex.Message, 400));
+        }
+        catch (StoredKeyUnreadableException ex)
+        {
+            return UnprocessableEntity(new ErrorResponse("stored_key_unreadable", ex.Message, 422));
         }
         catch (InvalidOperationException ex)
         {
