@@ -119,6 +119,12 @@ builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Inf
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimatorFactory, Aura.Infrastructure.Services.CloudCostEstimatorFactory>();
 builder.Services.AddScoped<IExperimentService, ExperimentService>();
 builder.Services.AddScoped<UserAiKeyService>();
+builder.Services.AddScoped<SecretMigrationService>();
+
+// One-off rollout step (#45): re-encrypt legacy stored secrets to v2 at startup. Idempotent.
+// Unset the variable once the migration log shows zero unreadable rows.
+if (string.Equals(Environment.GetEnvironmentVariable("MIGRATE_SECRETS_TO_V2"), "true", StringComparison.OrdinalIgnoreCase))
+    builder.Services.AddHostedService<SecretMigrationHostedService>();
 
 // LLM providers for AI essence generation. OpenAI-compatible providers are
 // registrations of one parameterized class; adding another gateway is one line.

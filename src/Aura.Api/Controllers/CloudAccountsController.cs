@@ -7,6 +7,7 @@ using Aura.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Aura.Api.Controllers;
 
@@ -19,17 +20,20 @@ public class CloudAccountsController : ControllerBase
     private readonly ITenantContext _tenant;
     private readonly ICryptoService _crypto;
     private readonly ICloudCredentialTester _tester;
+    private readonly ILogger<CloudAccountsController> _logger;
 
     public CloudAccountsController(
         AuraDbContext db,
         ITenantContext tenant,
         ICryptoService crypto,
-        ICloudCredentialTester tester)
+        ICloudCredentialTester tester,
+        ILogger<CloudAccountsController> logger)
     {
         _db = db;
         _tenant = tenant;
         _crypto = crypto;
         _tester = tester;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -96,6 +100,7 @@ public class CloudAccountsController : ControllerBase
             return NotFound(new ErrorResponse("not_found", "Cloud account not found.", 404));
 
         var credsJson = DecryptCredentials(account);
+        await UpgradeLegacyCredentialsAsync(account, credsJson, ct);
         var result = await _tester.TestAsync(account.Provider, credsJson, ct);
         return Ok(result);
     }
@@ -122,6 +127,27 @@ public class CloudAccountsController : ControllerBase
         catch (StoredSecretUnreadableException ex)
         {
             throw StoredSecretUnreadableException.ForCloudAccount(account.Label, ex);
+        }
+    }
+
+    // Re-encrypts a legacy row after a successful read by its owner. Best effort: a failed save must
+    // not fail the test call, because the legacy value still decrypts. Only the error type is logged.
+    private async Task UpgradeLegacyCredentialsAsync(CloudAccount account, string credsJson, CancellationToken ct)
+    {
+        if (!_crypto.IsLegacyFormat(account.EncryptedCredentials))
+            return;
+
+        try
+        {
+            account.EncryptedCredentials = _crypto.Encrypt(credsJson);
+            await _db.SaveChangesAsync(ct);
+            _logger.LogInformation("Re-encrypted legacy cloud account credentials: account={AccountId}", account.Id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                "Could not re-encrypt legacy cloud account credentials: account={AccountId}, error={ErrorType}",
+                account.Id, ex.GetType().Name);
         }
     }
 
