@@ -230,7 +230,11 @@ pre {
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* Action column */
-.actions { display: flex; gap: 0.25rem; }
+/* td.actions stays a table cell (display:flex on a <td> breaks row borders); gap via margins */
+.actions { white-space: nowrap; }
+div.actions { display: flex; gap: 0.25rem; }
+td.actions > * + * { margin-left: 0.25rem; }
+td code { white-space: nowrap; }
 
 /* Toast notification */
 .toast {

@@ -76,14 +76,14 @@ public class DashboardController : ControllerBase
 
         var result = essences.Select(e =>
         {
-            var provider = "-";
+            string? provider = null;  // null = not declared at essence level (e.g. multi-cloud); UI shows no pill
             var layerCount = 0;
             try
             {
                 using var doc = JsonDocument.Parse(e.EssenceJson);
                 if (doc.RootElement.TryGetProperty("baseEssence", out var be)
                     && be.TryGetProperty("cloudProvider", out var cp))
-                    provider = cp.GetString() ?? "-";
+                    provider = cp.GetString();
                 if (doc.RootElement.TryGetProperty("layers", out var layers))
                     layerCount = layers.EnumerateObject().Count();
             }
