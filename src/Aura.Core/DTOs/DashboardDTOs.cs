@@ -23,7 +23,7 @@ public sealed record RecentRunResponse(
 public sealed record RecentEssenceResponse(
     Guid Id,
     string Name,
-    string Provider,
+    string? Provider,
     int LayerCount,
     int CurrentVersion,
     DateTime UpdatedAt
