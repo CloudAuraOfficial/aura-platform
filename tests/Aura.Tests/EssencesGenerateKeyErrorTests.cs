@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using Aura.Api.Controllers;
+using Aura.Api.Middleware;
 using Aura.Api.Services;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
@@ -50,10 +51,11 @@ public class EssencesGenerateKeyErrorTests
         return controller;
     }
 
-    // Reproduces gap G4 from #35: a stored key that can't be decrypted used to fall through to the
-    // middleware and come back as a generic 500 internal_error. It must now be a 422 in the standard shape.
+    // Reproduces gap G4 from #35: a stored key that can't be decrypted used to fall through to a generic
+    // 500 internal_error. The controller no longer maps it itself. It lets the typed exception reach the
+    // middleware, which owns the 422 (see ExceptionHandlerMiddlewareTests).
     [Fact]
-    public async Task Generate_returns_422_stored_secret_unreadable_when_saved_key_cannot_be_decrypted()
+    public async Task Generate_lets_stored_secret_unreadable_reach_the_middleware_with_the_provider_as_selected()
     {
         var db = CreateInMemoryDb();
         var userId = Guid.NewGuid();
@@ -73,13 +75,45 @@ public class EssencesGenerateKeyErrorTests
             .Throws(StoredSecretUnreadableException.FromCryptoFailure(new CryptographicException()));
         var controller = Controller(db, userId, crypto);
 
-        var result = await controller.Generate(
-            new GenerateEssenceRequest("build me a vnet", cloudId, "OpenRouter"));
+        var ex = await Assert.ThrowsAsync<StoredSecretUnreadableException>(() =>
+            controller.Generate(new GenerateEssenceRequest("build me a vnet", cloudId, "OpenRouter")));
 
-        var obj = Assert.IsType<UnprocessableEntityObjectResult>(result);
-        var error = Assert.IsType<ErrorResponse>(obj.Value);
-        Assert.Equal(422, error.StatusCode);
-        Assert.Equal("stored_secret_unreadable", error.Error);
-        Assert.Equal("The stored key for 'OpenRouter' can't be read. Re-enter it in Account Settings.", error.Message);
+        Assert.Equal("The stored key for 'OpenRouter' can't be read. Re-enter it in Account Settings.", ex.Message);
+    }
+
+    [Fact]
+    public async Task Generate_returns_422_stored_secret_unreadable_through_the_middleware()
+    {
+        var db = CreateInMemoryDb();
+        var userId = Guid.NewGuid();
+        var cloudId = Guid.NewGuid();
+        db.UserAiProviders.Add(new UserAiProvider
+        {
+            TenantId = Guid.Empty, UserId = userId, ProviderName = "openrouter", EncryptedApiKey = "from-another-secret"
+        });
+        db.CloudAccounts.Add(new CloudAccount
+        {
+            Id = cloudId, TenantId = Guid.Empty, Provider = CloudProvider.Azure, Label = "acct"
+        });
+        await db.SaveChangesAsync();
+
+        var crypto = new Mock<ICryptoService>();
+        crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
+            .Throws(StoredSecretUnreadableException.FromCryptoFailure(new CryptographicException()));
+        var controller = Controller(db, userId, crypto);
+        var ctx = new DefaultHttpContext();
+        ctx.Response.Body = new MemoryStream();
+        var middleware = new ExceptionHandlerMiddleware(
+            async _ => await controller.Generate(new GenerateEssenceRequest("build me a vnet", cloudId, "OpenRouter")),
+            Mock.Of<ILogger<ExceptionHandlerMiddleware>>());
+
+        await middleware.InvokeAsync(ctx);
+
+        ctx.Response.Body.Position = 0;
+        var json = await new StreamReader(ctx.Response.Body).ReadToEndAsync();
+        Assert.Equal(422, ctx.Response.StatusCode);
+        Assert.Contains("\"error\":\"stored_secret_unreadable\"", json);
+        Assert.Contains("The stored key for 'OpenRouter' can't be read. Re-enter it in Account Settings.", json);
+        Assert.Contains("\"statusCode\":422", json);
     }
 }

@@ -1,6 +1,7 @@
 using Aura.Api.Middleware;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
+using Aura.Core.Exceptions;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -94,7 +95,7 @@ public class CloudAccountsController : ControllerBase
         if (account is null)
             return NotFound(new ErrorResponse("not_found", "Cloud account not found.", 404));
 
-        var credsJson = _crypto.Decrypt(account.EncryptedCredentials);
+        var credsJson = DecryptCredentials(account);
         var result = await _tester.TestAsync(account.Provider, credsJson, ct);
         return Ok(result);
     }
@@ -109,6 +110,19 @@ public class CloudAccountsController : ControllerBase
         _db.CloudAccounts.Remove(account);
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    // Names the account so the middleware can return an actionable 422. The middleware maps the exception.
+    private string DecryptCredentials(CloudAccount account)
+    {
+        try
+        {
+            return _crypto.Decrypt(account.EncryptedCredentials);
+        }
+        catch (StoredSecretUnreadableException ex)
+        {
+            throw StoredSecretUnreadableException.ForCloudAccount(account.Label, ex);
+        }
     }
 
     private static CloudAccountResponse ToDto(CloudAccount c) =>
