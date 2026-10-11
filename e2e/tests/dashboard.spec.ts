@@ -1,7 +1,7 @@
 import { test, expect, Page } from '@playwright/test';
 
-const EMAIL = process.env.TEST_EMAIL || 'org@cloudaura.cloud';
-const PASSWORD = process.env.TEST_PASSWORD || 'admin12345@$!';
+const EMAIL = process.env.TEST_EMAIL!;
+const PASSWORD = process.env.TEST_PASSWORD!;
 
 async function loginAndNavigate(page: Page, path: string) {
   // Get JWT via API

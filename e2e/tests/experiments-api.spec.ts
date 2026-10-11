@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
-const EMAIL = process.env.TEST_EMAIL || 'org@cloudaura.cloud';
-const PASSWORD = process.env.TEST_PASSWORD || 'admin12345@$!';
+const EMAIL = process.env.TEST_EMAIL!;
+const PASSWORD = process.env.TEST_PASSWORD!;
 const API = '/api/v1';
 
 let token: string;
