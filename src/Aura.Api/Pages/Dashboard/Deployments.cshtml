@@ -291,7 +291,9 @@ async function loadDeployments() {
             <td>${d.isEnabled ? '<span class="badge badge-success">Enabled</span>' : '<span class="badge badge-muted">Disabled</span>'}</td>
             <td>${latestCell}</td>
             <td class="actions">
-                <button class="btn btn-primary btn-sm" onclick="triggerRun('${d.id}', this)">Run</button>
+                ${d.isEnabled
+                    ? `<button class="btn btn-primary btn-sm" onclick="triggerRun('${d.id}', this)">Run</button>`
+                    : `<button class="btn btn-primary btn-sm" disabled title="Enable this deployment to run it">Run</button>`}
                 <button class="btn btn-secondary btn-sm" onclick="validateDeployment('${d.id}')">Validate</button>
                 <button class="btn btn-secondary btn-sm" onclick="viewRuns('${d.id}')">Runs</button>
                 <button class="btn btn-secondary btn-sm" onclick="openEditById('${d.id}')">Edit</button>
