@@ -10,23 +10,24 @@ namespace Aura.Api.Services;
 
 public sealed class EssenceValidator : IEssenceValidator
 {
-    public EssenceCheck Validate(string essenceJson, CloudProvider cloud) =>
-        Validate(essenceJson, cloud, json => DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.Empty));
+    public EssenceCheck Validate(string essenceJson, CloudProvider? cloud, bool canonicalize = true) =>
+        Validate(essenceJson, cloud, canonicalize, json => DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.Empty));
 
-    // Uses the same parser deployments use, so an essence we return is one a run can actually be
-    // created from: a cycle, an unknown runPolicy or executor, or an empty layer set would otherwise
-    // only fail later, at run creation. Any parser exception counts as an invalid output. Letting one
-    // escape would skip the retry loop and the usage row.
-    internal EssenceCheck Validate(string essenceJson, CloudProvider cloud, Func<string, List<DeploymentLayer>> parse)
+    // Collects every problem: shape first, then the deployment parser (the one run creation uses), then the
+    // operation types. The parser only runs on input the shape check accepted, so an InvalidEssenceException
+    // from it is a reason written for the user. Any other exception is a bug and propagates, so the caller
+    // returns a 500 instead of an answer that looks like a verdict on the essence.
+    internal EssenceCheck Validate(string essenceJson, CloudProvider? cloud, bool canonicalize,
+        Func<string, List<DeploymentLayer>> parse)
     {
         JsonDocument doc;
         try
         {
             doc = JsonDocument.Parse(essenceJson);
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
-            return Reject(essenceJson, ex.Message);
+            return Reject(essenceJson, "Essence JSON is not valid.");
         }
 
         using (doc)
@@ -34,21 +35,28 @@ public sealed class EssenceValidator : IEssenceValidator
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
                 return Reject(essenceJson, "response is valid JSON but not an object");
-            if (!root.TryGetProperty("layers", out _))
+            if (!root.TryGetProperty("layers", out var layers))
                 return Reject(essenceJson, "JSON is valid but missing 'layers' property");
+            if (layers.ValueKind != JsonValueKind.Object)
+                return Reject(essenceJson, "'layers' must be an object");
 
-            try
+            var problems = ShapeProblems(layers);
+            if (problems.Count == 0)
             {
-                var layers = parse(essenceJson);
-                if (layers.Count == 0)
-                    return Reject(essenceJson, "essence has no enabled layers");
-            }
-            catch (Exception ex)
-            {
-                return Reject(essenceJson, ex.Message);
+                try
+                {
+                    if (parse(essenceJson).Count == 0)
+                        problems.Add("essence has no enabled layers");
+                }
+                catch (InvalidEssenceException ex)
+                {
+                    problems.Add(ex.Message);
+                }
             }
 
-            return Finish(essenceJson, Walk(root, cloud));
+            var outcome = Walk(root, cloud, enabledOnly: true);
+            problems.AddRange(outcome.Problems);
+            return Finish(essenceJson, problems, outcome.Renames, canonicalize);
         }
     }
 
@@ -61,27 +69,29 @@ public sealed class EssenceValidator : IEssenceValidator
         }
         catch (JsonException)
         {
-            return new EssenceCheck(essenceJson, null);
+            return new EssenceCheck(essenceJson, []);
         }
 
         using (doc)
         {
-            return Finish(essenceJson, Walk(doc.RootElement, cloud: null));
+            var outcome = Walk(doc.RootElement, cloud: null, enabledOnly: false);
+            return Finish(essenceJson, outcome.Problems, outcome.Renames, canonicalize: true);
         }
     }
 
-    private static EssenceCheck Reject(string essenceJson, string reason) => new(essenceJson, reason);
+    private static EssenceCheck Reject(string essenceJson, string reason) => new(essenceJson, [reason]);
 
-    private static EssenceCheck Finish(string essenceJson, Outcome outcome)
+    private static EssenceCheck Finish(string essenceJson, List<string> problems, List<Rename> renames, bool canonicalize)
     {
-        if (outcome.Problems.Count > 0)
-            return Reject(essenceJson, string.Join(" ", outcome.Problems));
-        if (outcome.Renames.Count == 0)
-            return new EssenceCheck(essenceJson, null);
+        var errors = problems.Distinct().ToList();
+        if (errors.Count > 0)
+            return new EssenceCheck(essenceJson, errors);
+        if (!canonicalize || renames.Count == 0)
+            return new EssenceCheck(essenceJson, []);
 
         // Stored in canonical casing; an essence that already uses it is stored exactly as sent.
         var node = JsonNode.Parse(essenceJson)!;
-        foreach (var rename in outcome.Renames)
+        foreach (var rename in renames)
         {
             var layer = node["layers"]![rename.Layer]!.AsObject();
             if (rename.InLayer)
@@ -90,13 +100,70 @@ public sealed class EssenceValidator : IEssenceValidator
                 layer["parameters"]!.AsObject()["operationType"] = rename.Canonical;
         }
         var options = new JsonSerializerOptions { WriteIndented = true, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-        return new EssenceCheck(node.ToJsonString(options), null);
+        return new EssenceCheck(node.ToJsonString(options), []);
     }
 
-    // One pass over the layers, shared by generation and save. Reads each operationType the way the Worker
-    // does (DeploymentOrchestrationService.ReadLayerOperationType), and checks only layers whose executor
-    // uses an operation type: operation layers, and emissionload layers, which run the Azure entrypoint's list.
-    private static Outcome Walk(JsonElement root, CloudProvider? cloud)
+    // What the parser would throw on, named by layer. The parser reads isEnabled on every layer and the other
+    // properties only on enabled ones, so the checks follow that: a disabled layer needs only a boolean isEnabled.
+    private static List<string> ShapeProblems(JsonElement layers)
+    {
+        var problems = new List<string>();
+        foreach (var layer in layers.EnumerateObject())
+        {
+            var name = layer.Name;
+            var value = layer.Value;
+            if (value.ValueKind != JsonValueKind.Object)
+            {
+                problems.Add($"Layer '{name}' must be an object.");
+                continue;
+            }
+            if (value.TryGetProperty("isEnabled", out var enabled)
+                && enabled.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                problems.Add($"Layer '{name}': isEnabled must be true or false.");
+                continue;
+            }
+            if (!IsEnabled(value))
+                continue;
+
+            if (IsNeitherStringNorNull(value, "executorType"))
+                problems.Add($"Layer '{name}': executorType must be a string.");
+            if (IsNeitherStringNorNull(value, "scriptPath"))
+                problems.Add($"Layer '{name}': scriptPath must be a string.");
+            if (value.TryGetProperty("dependsOn", out var deps) && deps.ValueKind == JsonValueKind.Array
+                && deps.EnumerateArray().Any(d => d.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)))
+                problems.Add($"Layer '{name}': dependsOn must list layer names.");
+
+            string? operationType;
+            try
+            {
+                operationType = DeploymentOrchestrationService.ReadLayerOperationType(name, value);
+            }
+            catch (InvalidEssenceException ex)
+            {
+                problems.Add(ex.Message);
+                continue;
+            }
+            // The parser copies operationType into parameters, which only works on an object.
+            if (operationType is not null && value.TryGetProperty("parameters", out var parameters)
+                && parameters.ValueKind != JsonValueKind.Object)
+                problems.Add($"Layer '{name}': parameters must be an object when operationType is set.");
+        }
+        return problems;
+    }
+
+    // Run creation skips a layer unless its isEnabled is the boolean true.
+    private static bool IsEnabled(JsonElement layer) =>
+        layer.TryGetProperty("isEnabled", out var enabled) && enabled.ValueKind == JsonValueKind.True;
+
+    private static bool IsNeitherStringNorNull(JsonElement layer, string property) =>
+        layer.TryGetProperty(property, out var value) && value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null);
+
+    // One pass over the layers, shared by generation, save and deployment validation. Reads each operationType the
+    // way the Worker does (DeploymentOrchestrationService.ReadLayerOperationType), and checks only layers whose
+    // executor uses an operation type: operation layers, and emissionload layers, which run the Azure entrypoint's list.
+    // With enabledOnly, disabled layers are skipped, as run creation skips them.
+    private static Outcome Walk(JsonElement root, CloudProvider? cloud, bool enabledOnly)
     {
         var problems = new List<string>();
         var renames = new List<Rename>();
@@ -116,13 +183,15 @@ public sealed class EssenceValidator : IEssenceValidator
         {
             if (layer.Value.ValueKind != JsonValueKind.Object)
                 continue;
+            if (enabledOnly && !IsEnabled(layer.Value))
+                continue;
 
             string? layerLevel;
             try
             {
                 layerLevel = DeploymentOrchestrationService.ReadLayerOperationType(layer.Name, layer.Value);
             }
-            catch (InvalidOperationException ex)
+            catch (InvalidEssenceException ex)
             {
                 problems.Add(ex.Message);
                 continue;

@@ -37,3 +37,11 @@ public sealed record LatestRunSummary(
     DateTime? StartedAt,
     DateTime? CompletedAt
 );
+
+/// <summary>Result of checking a deployment's essence against what run creation and save accept.
+/// Errors is empty when valid; Message is a one-line summary for display.</summary>
+public sealed record DeploymentValidationResponse(
+    bool IsValid,
+    string Message,
+    IReadOnlyList<string> Errors
+);

@@ -106,7 +106,7 @@ public class SnapshotParsingTests
             }
         });
 
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.ThrowsAny<InvalidOperationException>(() =>
             DeploymentOrchestrationService.ParseAndSortLayers(essenceJson, Guid.NewGuid()));
     }
 }

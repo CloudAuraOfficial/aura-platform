@@ -461,7 +461,8 @@ public class PostgresIntegrationTests : IAsyncLifetime
                 db,
                 Mock.Of<Core.Interfaces.ITenantContext>(t => t.TenantId == tenantId),
                 Mock.Of<Core.Interfaces.IDeploymentOrchestrationService>(),
-                Mock.Of<Core.Interfaces.ICloudCostEstimatorFactory>());
+                Mock.Of<Core.Interfaces.ICloudCostEstimatorFactory>(),
+                Mock.Of<Aura.Api.Services.IDeploymentValidationService>());
 
             var result = await controller.List(0, 25);
             var ok = Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(result);
