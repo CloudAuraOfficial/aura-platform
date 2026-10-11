@@ -17,9 +17,10 @@ public sealed class EssenceValidator : IEssenceValidator
         Validate(essenceJson, cloud, canonicalize, RunCreationParser);
 
     // Save, update and clone. Checks the same things as generation and deployment, except that the cloud is not
-    // known here: every operation type must be valid on some cloud, and disabled layers are checked too, since
-    // enabling one later should not be the first time its type is seen. Essences may mix clouds, because the
-    // Worker gives each layer its own cloud account.
+    // known here: every operation type must be valid on some cloud. A disabled layer gets only the isEnabled and
+    // operationType checks, since enabling it later should not be the first time its type is seen; its other fields
+    // are not checked. An essence with no enabled layers is accepted, so a paused essence can be saved; only
+    // deployment validation rejects it. Essences may mix clouds, because the Worker gives each layer its own account.
     public EssenceCheck CheckForSave(string essenceJson) =>
         Check(essenceJson, cloud: null, enabledOnly: false, canonicalize: true, parse: RunCreationParser);
 
@@ -54,12 +55,20 @@ public sealed class EssenceValidator : IEssenceValidator
             if (layers.ValueKind != JsonValueKind.Object)
                 return Reject(essenceJson, "'layers' must be an object");
 
+            // The parser keeps the last of two layers with one name, so the duplicate is rejected before parsing.
+            var seen = new HashSet<string>();
+            foreach (var layer in layers.EnumerateObject())
+                if (!seen.Add(layer.Name))
+                    return Reject(essenceJson, $"Duplicate layer name '{layer.Name}'.");
+
             var problems = ShapeProblems(layers);
             if (problems.Count == 0)
             {
                 try
                 {
-                    if (parse(essenceJson).Count == 0)
+                    // Run creation accepts an essence with no enabled layers, so only deployment validation rejects one.
+                    // The parse runs in both modes: it is where cycles, unknown dependencies and bad runPolicies are found.
+                    if (parse(essenceJson).Count == 0 && enabledOnly)
                         problems.Add("essence has no enabled layers");
                 }
                 catch (InvalidEssenceException ex)
@@ -103,7 +112,6 @@ public sealed class EssenceValidator : IEssenceValidator
     private static List<string> ShapeProblems(JsonElement layers)
     {
         var problems = new List<string>();
-        var layerNames = layers.EnumerateObject().Select(l => l.Name).ToHashSet();
         foreach (var layer in layers.EnumerateObject())
         {
             var name = layer.Name;
@@ -129,12 +137,6 @@ public sealed class EssenceValidator : IEssenceValidator
             if (value.TryGetProperty("dependsOn", out var deps) && deps.ValueKind == JsonValueKind.Array
                 && deps.EnumerateArray().Any(d => d.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)))
                 problems.Add($"Layer '{name}': dependsOn must list layer names.");
-            // A dependency on a disabled layer is dropped at run creation (intended: disable a step without editing
-            // its dependents). A name that matches no layer at all is a typo, so it is rejected.
-            else if (value.TryGetProperty("dependsOn", out var named) && named.ValueKind == JsonValueKind.Array)
-                foreach (var dep in named.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!))
-                    if (!layerNames.Contains(dep))
-                        problems.Add($"Layer '{name}' depends on '{dep}', which does not exist.");
 
             string? operationType;
             try

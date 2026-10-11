@@ -290,7 +290,7 @@ public class EssencesController : ControllerBase
 
         var check = _validator.CheckForSave(source.EssenceJson);
         if (check.Error is not null)
-            return RejectInvalidEssence(check.Error, "clone");
+            return RejectInvalidEssence($"Source essence is invalid: {check.Error}", "clone");
 
         var clone = new Essence
         {

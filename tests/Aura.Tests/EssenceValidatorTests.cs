@@ -401,17 +401,74 @@ public class EssenceValidatorTests
     }
 
     [Fact]
-    public void Save_rejects_an_essence_whose_layers_are_all_disabled()
+    public void Save_accepts_an_essence_whose_layers_are_all_disabled_so_it_can_be_paused()
     {
         var json = Essence(Layer("off", "CreateResourceGroup", enabled: false));
 
-        Assert.Equal(new[] { "essence has no enabled layers" }, Validator.CheckForSave(json).Errors);
+        var check = Validator.CheckForSave(json);
+
+        Assert.True(check.IsValid);
+        Assert.Equal(json, check.EssenceJson);
     }
 
     [Fact]
-    public void Save_rejects_an_empty_layers_object()
+    public void Save_accepts_an_empty_layers_object()
     {
-        Assert.Equal(new[] { "essence has no enabled layers" }, Validator.CheckForSave(Essence("")).Errors);
+        Assert.Null(Validator.CheckForSave(Essence("")).Error);
+    }
+
+    [Fact]
+    public void Save_still_rejects_a_disabled_layer_with_an_unknown_operation_type()
+    {
+        // Paused layers keep their operation type checked, so enabling one later cannot be the first time it is seen.
+        var reason = Validator.CheckForSave(Essence(Layer("off", "Nope", enabled: false))).Error;
+
+        Assert.NotNull(reason);
+        Assert.Contains("layer 'off' uses 'Nope'", reason);
+    }
+
+    [Fact]
+    public void Save_rejects_duplicate_layer_names_with_one_reason()
+    {
+        var json = Essence($"{KnownLayer}, {KnownLayer}");
+
+        Assert.Equal(new[] { "Duplicate layer name 'create-rg'." }, Validator.CheckForSave(json).Errors);
+    }
+
+    [Fact]
+    public void Save_rejects_duplicate_layer_names_even_when_the_second_copy_is_disabled()
+    {
+        var json = Essence($"{KnownLayer}, {Layer("create-rg", "CreateResourceGroup", enabled: false)}");
+
+        Assert.Equal(new[] { "Duplicate layer name 'create-rg'." }, Validator.CheckForSave(json).Errors);
+    }
+
+    [Fact]
+    public void Deployment_rejects_duplicate_layer_names()
+    {
+        var json = Essence($"{KnownLayer}, {KnownLayer}");
+
+        Assert.Equal(new[] { "Duplicate layer name 'create-rg'." }, ValidateForDeployment(json).Errors);
+    }
+
+    [Fact]
+    public void Save_rejects_a_dependency_on_a_name_that_matches_no_layer_at_all()
+    {
+        // Same rule as run creation: the parser throws, and save reports the parser's message.
+        var json = Essence("\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"ghost\"] }");
+
+        Assert.Equal(new[] { "Layer 'a' depends on 'ghost', which does not exist." }, Validator.CheckForSave(json).Errors);
+    }
+
+    [Fact]
+    public void Save_ignores_the_dependencies_of_a_disabled_layer()
+    {
+        // Run creation skips a disabled layer entirely, so its own dependsOn is not read.
+        var json = Essence(
+            "\"a\": { \"isEnabled\": false, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"ghost\"] }, " +
+            "\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"a\"] }");
+
+        Assert.Null(Validator.CheckForSave(json).Error);
     }
 
     [Fact]
@@ -561,6 +618,25 @@ public class EssenceValidatorTests
         Assert.Equal(2, errors.Count);
         Assert.Equal("Cycle detected in layer dependencies.", errors[0]);
         Assert.Contains("layer 'c' uses 'Nope'", errors[1]);
+    }
+
+    [Fact]
+    public void Deployment_accepts_a_dependency_on_a_disabled_layer()
+    {
+        // Run creation drops it, so validation must agree; the Aura ACI Deploy live essence depends on this.
+        var json = Essence(
+            "\"a\": { \"isEnabled\": false, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [] }, " +
+            "\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"a\"] }");
+
+        Assert.Null(ValidateForDeployment(json).Error);
+    }
+
+    [Fact]
+    public void Deployment_rejects_a_dependency_on_a_name_that_matches_no_layer()
+    {
+        var json = Essence("\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"gost\"] }");
+
+        Assert.Equal(new[] { "Layer 'b' depends on 'gost', which does not exist." }, ValidateForDeployment(json).Errors);
     }
 
     [Fact]

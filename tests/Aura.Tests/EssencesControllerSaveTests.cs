@@ -97,16 +97,105 @@ public class EssencesControllerSaveTests
     }
 
     [Fact]
-    public async Task Create_rejects_an_essence_with_no_enabled_layers()
+    public async Task Create_stores_a_paused_essence_with_no_enabled_layers()
     {
         var tenant = Guid.NewGuid();
         var (controller, db) = Build(tenant, Guid.NewGuid().ToString());
         var accountId = await SeedAccountAsync(db, tenant);
 
-        var result = await controller.Create(new CreateEssenceRequest("draft", accountId, NoEnabledLayersJson));
+        var result = await controller.Create(new CreateEssenceRequest("paused", accountId, NoEnabledLayersJson));
 
-        AssertStandardBadRequest(result, "essence has no enabled layers");
+        Assert.IsType<CreatedAtActionResult>(result);
+        Assert.Single(await db.Essences.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Create_stores_an_essence_with_an_empty_layers_object()
+    {
+        var tenant = Guid.NewGuid();
+        var (controller, db) = Build(tenant, Guid.NewGuid().ToString());
+        var accountId = await SeedAccountAsync(db, tenant);
+
+        var result = await controller.Create(new CreateEssenceRequest("empty", accountId, "{ \"layers\": {} }"));
+
+        Assert.IsType<CreatedAtActionResult>(result);
+    }
+
+    [Fact]
+    public async Task Create_rejects_duplicate_layer_names_with_a_400_not_a_500()
+    {
+        var tenant = Guid.NewGuid();
+        var (controller, db) = Build(tenant, Guid.NewGuid().ToString());
+        var accountId = await SeedAccountAsync(db, tenant);
+        const string duplicateJson =
+            """
+            {
+              "layers": {
+                "create-rg": { "isEnabled": true, "operationType": "CreateResourceGroup", "parameters": {}, "dependsOn": [] },
+                "create-rg": { "isEnabled": true, "operationType": "CreateResourceGroup", "parameters": {}, "dependsOn": [] }
+              }
+            }
+            """;
+
+        var result = await controller.Create(new CreateEssenceRequest("dup", accountId, duplicateJson));
+
+        AssertStandardBadRequest(result, "Duplicate layer name 'create-rg'.");
         Assert.Empty(await db.Essences.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Update_accepts_pausing_an_essence_by_disabling_every_layer()
+    {
+        var tenant = Guid.NewGuid();
+        var (controller, db) = Build(tenant, Guid.NewGuid().ToString());
+        var accountId = await SeedAccountAsync(db, tenant);
+        var created = Assert.IsType<CreatedAtActionResult>(
+            await controller.Create(new CreateEssenceRequest("draft", accountId, ValidJson)));
+        var essenceId = ((EssenceResponse)created.Value!).Id;
+
+        var result = await controller.Update(essenceId, new UpdateEssenceRequest(null, null, NoEnabledLayersJson));
+
+        Assert.IsType<OkObjectResult>(result);
+        var stored = await db.Essences.AsNoTracking().SingleAsync(e => e.Id == essenceId);
+        Assert.Equal(2, stored.CurrentVersion);
+    }
+
+    [Fact]
+    public async Task Clone_of_a_paused_essence_is_accepted()
+    {
+        var tenant = Guid.NewGuid();
+        var (controller, db) = Build(tenant, Guid.NewGuid().ToString());
+        var accountId = await SeedAccountAsync(db, tenant);
+        var source = new Essence
+        {
+            TenantId = tenant, Name = "paused", CloudAccountId = accountId, EssenceJson = NoEnabledLayersJson, CurrentVersion = 1
+        };
+        db.Essences.Add(source);
+        await db.SaveChangesAsync();
+
+        var result = await controller.Clone(source.Id, new CloneEssenceRequest("copy"));
+
+        Assert.IsType<CreatedAtActionResult>(result);
+        Assert.Equal(2, await db.Essences.CountAsync());
+    }
+
+    [Fact]
+    public async Task Clone_of_an_invalid_source_says_the_source_is_at_fault()
+    {
+        var tenant = Guid.NewGuid();
+        var (controller, db) = Build(tenant, Guid.NewGuid().ToString());
+        var accountId = await SeedAccountAsync(db, tenant);
+        var source = new Essence
+        {
+            TenantId = tenant, Name = "broken", CloudAccountId = accountId, EssenceJson = CyclicJson, CurrentVersion = 1
+        };
+        db.Essences.Add(source);
+        await db.SaveChangesAsync();
+
+        var result = await controller.Clone(source.Id, new CloneEssenceRequest("copy"));
+
+        AssertStandardBadRequest(result, "Source essence is invalid: Cycle detected in layer dependencies.");
+        Assert.Single(await db.Essences.ToListAsync());
     }
 
     [Fact]
