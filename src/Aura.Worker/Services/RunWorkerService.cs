@@ -8,6 +8,7 @@ using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
 using Aura.Worker.Executors;
 using Aura.Worker.Operations;
+using Aura.Worker.Operations.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Prometheus;
@@ -470,9 +471,14 @@ public class RunWorkerService : BackgroundService
     /// Snapshot-level envVars (provider, region, uniqueId, subscriptionId).
     /// No credentials. Called once per run.
     /// </summary>
-    private static Dictionary<string, string> BuildSnapshotEnvVars(DeploymentRun run)
+    internal static Dictionary<string, string> BuildSnapshotEnvVars(DeploymentRun run)
     {
-        var envVars = new Dictionary<string, string>();
+        // Run and tenant ids feed the aura-run-id / aura-tenant-id resource tags (#53).
+        var envVars = new Dictionary<string, string>
+        {
+            [ResourceTags.RunIdEnvVar] = run.Id.ToString(),
+            [ResourceTags.TenantIdEnvVar] = run.TenantId.ToString(),
+        };
         try
         {
             using var doc = JsonDocument.Parse(run.SnapshotJson);
@@ -580,7 +586,7 @@ public class RunWorkerService : BackgroundService
     }
 
     // Names the account so the layer's failure output tells the operator what to re-enter.
-    private static string DecryptCredentials(ICryptoService crypto, CloudAccount account)
+    internal static string DecryptCredentials(ICryptoService crypto, CloudAccount account)
     {
         try
         {

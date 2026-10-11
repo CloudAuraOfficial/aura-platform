@@ -49,12 +49,11 @@ public static class AwsClientFactory
             : new BasicAWSCredentials(accessKey, secretKey);
     }
 
-    private static RegionEndpoint GetRegion(Dictionary<string, string> envVars)
-    {
-        var regionName = envVars.GetValueOrDefault("AWS_REGION")
+    public static string RegionName(Dictionary<string, string> envVars) =>
+        envVars.GetValueOrDefault("AWS_REGION")
             ?? envVars.GetValueOrDefault("AURA_DEFAULT_REGION")
             ?? "us-east-1";
 
-        return RegionEndpoint.GetBySystemName(regionName);
-    }
+    private static RegionEndpoint GetRegion(Dictionary<string, string> envVars) =>
+        RegionEndpoint.GetBySystemName(RegionName(envVars));
 }

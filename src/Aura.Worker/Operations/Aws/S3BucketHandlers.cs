@@ -2,6 +2,7 @@ using System.Text.Json;
 using Amazon.S3;
 using Amazon.S3.Model;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Aura.Worker.Operations.Aws;
@@ -27,6 +28,9 @@ public class CreateS3BucketHandler : IOperationHandler
         var versioning = parameters.TryGetProperty("versioning", out var vProp) && vProp.GetBoolean();
         var publicAccessBlock = !parameters.TryGetProperty("publicAccessBlock", out var pabProp) || pabProp.GetBoolean();
 
+        if (!ResourceTags.TryBuild(envVars, parameters, DateTime.UtcNow, out var tags, out var tagError))
+            return new LayerExecutionResult(false, tagError!);
+
         using var s3 = AwsClientFactory.CreateS3(envVars);
 
         try
@@ -46,7 +50,7 @@ public class CreateS3BucketHandler : IOperationHandler
                     new() { Key = "Name", Value = bucketName },
                     new() { Key = "aura:layer", Value = layerName },
                     new() { Key = "aura:managed", Value = "true" },
-                },
+                }.Concat(tags.Select(kv => new Tag { Key = kv.Key, Value = kv.Value })).ToList(),
             }, ct);
 
             if (versioning)

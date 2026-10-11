@@ -2,6 +2,7 @@ using System.Text.Json;
 using Amazon.EC2;
 using Amazon.EC2.Model;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Aura.Worker.Operations.Aws;
@@ -52,6 +53,9 @@ public class CreateEc2InstanceHandler : IOperationHandler
             openPorts = ports.EnumerateArray().Select(p => p.GetInt32()).ToList();
         }
 
+        if (!ResourceTags.TryBuild(envVars, parameters, DateTime.UtcNow, out var tags, out var tagError))
+            return new LayerExecutionResult(false, tagError!);
+
         using var ec2 = AwsClientFactory.CreateEc2(envVars);
 
         try
@@ -78,7 +82,7 @@ public class CreateEc2InstanceHandler : IOperationHandler
                 GroupName = $"{instanceName}-sg",
                 Description = $"SG for {instanceName}",
                 VpcId = vpcId,
-                TagSpecifications = TagSpecs(ResourceType.SecurityGroup, $"{instanceName}-sg", layerName),
+                TagSpecifications = TagSpecs(ResourceType.SecurityGroup, $"{instanceName}-sg", layerName, tags),
             }, ct);
 
             await ec2.AuthorizeSecurityGroupIngressAsync(new AuthorizeSecurityGroupIngressRequest
@@ -102,7 +106,7 @@ public class CreateEc2InstanceHandler : IOperationHandler
                 MaxCount = 1,
                 SubnetId = subnetId,
                 SecurityGroupIds = new List<string> { sg.GroupId },
-                TagSpecifications = TagSpecs(ResourceType.Instance, instanceName, layerName),
+                TagSpecifications = TagSpecs(ResourceType.Instance, instanceName, layerName, tags),
             };
             if (!string.IsNullOrEmpty(keyName)) runReq.KeyName = keyName;
 
@@ -118,7 +122,8 @@ public class CreateEc2InstanceHandler : IOperationHandler
         }
     }
 
-    private static List<TagSpecification> TagSpecs(ResourceType resourceType, string nameTag, string layerName) =>
+    private static List<TagSpecification> TagSpecs(
+        ResourceType resourceType, string nameTag, string layerName, IReadOnlyDictionary<string, string> expiryTags) =>
         new()
         {
             new TagSpecification
@@ -129,7 +134,7 @@ public class CreateEc2InstanceHandler : IOperationHandler
                     new() { Key = "Name", Value = nameTag },
                     new() { Key = "aura:layer", Value = layerName },
                     new() { Key = "aura:managed", Value = "true" },
-                },
+                }.Concat(expiryTags.Select(kv => new Tag { Key = kv.Key, Value = kv.Value })).ToList(),
             },
         };
 }

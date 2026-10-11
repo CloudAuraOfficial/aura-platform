@@ -2,6 +2,7 @@ using System.Text.Json;
 using Amazon.EC2;
 using Amazon.EC2.Model;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations.Common;
 using Microsoft.Extensions.Logging;
 
 namespace Aura.Worker.Operations.Aws;
@@ -37,6 +38,9 @@ public class CreateVpcHandler : IOperationHandler
         var cidr = parameters.TryGetProperty("cidrBlock", out var c) ? c.GetString()! : "10.0.0.0/16";
         var subnetCidr = parameters.TryGetProperty("subnetCidr", out var s) ? s.GetString()! : "10.0.0.0/24";
 
+        if (!ResourceTags.TryBuild(envVars, parameters, DateTime.UtcNow, out var tags, out var tagError))
+            return new LayerExecutionResult(false, tagError!);
+
         using var ec2 = AwsClientFactory.CreateEc2(envVars);
         var az = parameters.TryGetProperty("availabilityZone", out var azProp)
             ? azProp.GetString()!
@@ -48,7 +52,7 @@ public class CreateVpcHandler : IOperationHandler
             var vpc = (await ec2.CreateVpcAsync(new CreateVpcRequest
             {
                 CidrBlock = cidr,
-                TagSpecifications = TagSpecs(ResourceType.Vpc, vpcName, layerName),
+                TagSpecifications = TagSpecs(ResourceType.Vpc, vpcName, layerName, tags),
             }, ct)).Vpc;
 
             _logger.LogInformation("Creating subnet {Cidr} for VPC {VpcId} in {Az}", subnetCidr, vpc.VpcId, az);
@@ -57,13 +61,13 @@ public class CreateVpcHandler : IOperationHandler
                 VpcId = vpc.VpcId,
                 CidrBlock = subnetCidr,
                 AvailabilityZone = az,
-                TagSpecifications = TagSpecs(ResourceType.Subnet, $"{vpcName}-subnet", layerName),
+                TagSpecifications = TagSpecs(ResourceType.Subnet, $"{vpcName}-subnet", layerName, tags),
             }, ct)).Subnet;
 
             _logger.LogInformation("Creating internet gateway for VPC {VpcId}", vpc.VpcId);
             var igw = (await ec2.CreateInternetGatewayAsync(new CreateInternetGatewayRequest
             {
-                TagSpecifications = TagSpecs(ResourceType.InternetGateway, $"{vpcName}-igw", layerName),
+                TagSpecifications = TagSpecs(ResourceType.InternetGateway, $"{vpcName}-igw", layerName, tags),
             }, ct)).InternetGateway;
 
             await ec2.AttachInternetGatewayAsync(new AttachInternetGatewayRequest
@@ -76,7 +80,7 @@ public class CreateVpcHandler : IOperationHandler
             var rt = (await ec2.CreateRouteTableAsync(new CreateRouteTableRequest
             {
                 VpcId = vpc.VpcId,
-                TagSpecifications = TagSpecs(ResourceType.RouteTable, $"{vpcName}-rt", layerName),
+                TagSpecifications = TagSpecs(ResourceType.RouteTable, $"{vpcName}-rt", layerName, tags),
             }, ct)).RouteTable;
 
             await ec2.CreateRouteAsync(new CreateRouteRequest
@@ -102,7 +106,8 @@ public class CreateVpcHandler : IOperationHandler
         }
     }
 
-    private static List<TagSpecification> TagSpecs(ResourceType resourceType, string nameTag, string layerName) =>
+    private static List<TagSpecification> TagSpecs(
+        ResourceType resourceType, string nameTag, string layerName, IReadOnlyDictionary<string, string> expiryTags) =>
         new()
         {
             new TagSpecification
@@ -113,7 +118,7 @@ public class CreateVpcHandler : IOperationHandler
                     new() { Key = "Name", Value = nameTag },
                     new() { Key = "aura:layer", Value = layerName },
                     new() { Key = "aura:managed", Value = "true" },
-                },
+                }.Concat(expiryTags.Select(kv => new Tag { Key = kv.Key, Value = kv.Value })).ToList(),
             },
         };
 }
