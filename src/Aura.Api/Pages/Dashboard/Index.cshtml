@@ -6,6 +6,7 @@
 
 <h1>Dashboard</h1>
 
+<div id="dashError"></div>
 <div class="stat-grid">
     <div class="stat"><div class="stat-value" id="essenceCount">-</div><div class="stat-label">Essences</div></div>
     <div class="stat"><div class="stat-value" id="deploymentCount">-</div><div class="stat-label">Deployments</div></div>
@@ -24,15 +25,11 @@
 const token = localStorage.getItem('aura_token');
 if (!token) window.location.href = '/dashboard/login';
 
-async function api(path) {
-    const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token } });
-    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
-    return await res.json();
-}
+const api = auraApi;
 
 function badge(status) {
     const map = { Succeeded: 'success', Failed: 'danger', Running: 'warning', Queued: 'info', Cancelled: 'muted', Pending: 'muted' };
-    return `<span class="badge badge-${map[status] || 'muted'}">${status}</span>`;
+    return `<span class="badge badge-${map[status] || 'muted'}">${esc(status)}</span>`;
 }
 
 function formatCost(cost) {
@@ -40,10 +37,17 @@ function formatCost(cost) {
     return '$' + Number(cost).toFixed(4);
 }
 
+function setSection(id, html) {
+    document.getElementById(id).innerHTML = html;
+}
+
 async function loadDashboard() {
     // Single consolidated stats call (replaces 4 separate limit=1 calls)
     const stats = await api('/api/v1/dashboard/stats');
-    if (stats) {
+    if (stats && stats.error) {
+        document.getElementById('dashError').innerHTML = errorState(stats.message);
+    } else if (stats) {
+        document.getElementById('dashError').innerHTML = '';
         document.getElementById('essenceCount').textContent = stats.essenceCount;
         document.getElementById('deploymentCount').textContent = stats.deploymentCount;
         document.getElementById('userCount').textContent = stats.userCount;
@@ -53,33 +57,43 @@ async function loadDashboard() {
 
     // Recent runs — single query replaces the N+1 loop
     const runs = await api('/api/v1/dashboard/recent-runs?limit=10');
-    if (runs && runs.length > 0) {
-        document.getElementById('recentRuns').innerHTML = `<table><thead><tr>
+    if (!runs) return;
+    if (runs.error) {
+        setSection('recentRuns', errorState(runs.message));
+    } else if (runs.length > 0) {
+        setSection('recentRuns', `<table><thead><tr>
             <th>Deployment</th><th>Status</th><th>Layers</th><th>Started</th><th>Duration</th><th>Est. Cost</th>
         </tr></thead><tbody>${runs.map(r => {
             const started = r.startedAt ? new Date(r.startedAt).toLocaleString() : '-';
             const dur = r.startedAt && r.completedAt ? Math.round((new Date(r.completedAt) - new Date(r.startedAt))/1000) + 's' : '-';
-            return `<tr><td><a href="/dashboard/run?deploymentId=${r.deploymentId}&runId=${r.id}">${esc(r.deploymentName)}</a></td><td>${badge(r.status)}</td>
-                <td>${r.layerCount}</td><td>${started}</td><td>${dur}</td><td>${formatCost(r.estimatedCostUsd)}</td></tr>`;
-        }).join('')}</tbody></table>`;
-    } else if (runs) {
-        document.getElementById('recentRuns').innerHTML = '<div class="empty">No runs yet</div>';
+            return `<tr><td><a href="/dashboard/run?deploymentId=${encodeURIComponent(r.deploymentId)}&runId=${encodeURIComponent(r.id)}">${esc(r.deploymentName)}</a></td><td>${badge(r.status)}</td>
+                <td>${esc(r.layerCount)}</td><td>${esc(started)}</td><td>${dur}</td><td>${formatCost(r.estimatedCostUsd)}</td></tr>`;
+        }).join('')}</tbody></table>`);
+    } else {
+        setSection('recentRuns', emptyState(
+            'Runs show up here after you run a deployment. Each run opens in the Run Theater with live logs.',
+            '<a class="btn btn-primary" href="/dashboard/deployments">Go to Deployments</a>'));
     }
 
     // Recent essences
     const essences = await api('/api/v1/dashboard/recent-essences?limit=5');
-    if (essences && essences.length > 0) {
-        document.getElementById('recentEssences').innerHTML = `<table><thead><tr>
+    if (!essences) return;
+    if (essences.error) {
+        setSection('recentEssences', errorState(essences.message));
+    } else if (essences.length > 0) {
+        setSection('recentEssences', `<table><thead><tr>
             <th>Name</th><th>Provider</th><th>Layers</th><th>Version</th><th>Last Updated</th>
         </tr></thead><tbody>${essences.map(e => {
             return `<tr><td><strong>${esc(e.name)}</strong></td>
-                <td><span class="badge badge-info">${esc(e.provider)}</span></td>
+                <td><span class="badge badge-info">${esc(providerLabel(e.provider))}</span></td>
                 <td>${e.layerCount} layer${e.layerCount !== 1 ? 's' : ''}</td>
-                <td>v${e.currentVersion}</td>
-                <td>${new Date(e.updatedAt).toLocaleString()}</td></tr>`;
-        }).join('')}</tbody></table>`;
-    } else if (essences) {
-        document.getElementById('recentEssences').innerHTML = '<div class="empty">No essences yet</div>';
+                <td>v${esc(e.currentVersion)}</td>
+                <td>${esc(new Date(e.updatedAt).toLocaleString())}</td></tr>`;
+        }).join('')}</tbody></table>`);
+    } else {
+        setSection('recentEssences', emptyState(
+            'Essences describe what to deploy. Write one by hand or let AI draft it from a sentence.',
+            '<a class="btn btn-primary" href="/dashboard/essences">Go to Essences</a>'));
     }
 }
 loadDashboard();

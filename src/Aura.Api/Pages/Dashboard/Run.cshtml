@@ -47,23 +47,9 @@ let run = null;
 let pollTimer = null, tickTimer = null;
 let streaming = false, streamRetried = false;
 
-async function api(path, opts = {}) {
-    const res = await fetch(path, {
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        ...opts
-    });
-    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
-    if (res.status === 204) return {};
-    return await res.json();
-}
+const api = auraApi;
 
-function toast(msg, type = 'success') {
-    const el = document.createElement('div');
-    el.className = `toast toast-${type}`;
-    el.textContent = msg;
-    document.body.appendChild(el);
-    setTimeout(() => el.remove(), 3000);
-}
+function toast(msg, type = 'success') { auraToast(msg, type); }
 
 function badge(status) {
     const map = { Succeeded: 'success', Failed: 'danger', Running: 'warning', Queued: 'info', Cancelled: 'muted', Pending: 'muted' };
@@ -108,7 +94,7 @@ function renderPipeline() {
             <div class="layer-chip"></div>
             <div class="layer-body">
                 <div class="layer-name">${esc(l.layerName)}</div>
-                <div class="layer-sub"><code>${esc(l.executorType)}</code>${l.dependsOn ? ' · after ' + esc(l.dependsOn) : ''}</div>
+                <div class="layer-sub"><code>${esc(executorLabel(l.executorType))}</code>${l.dependsOn ? ' · after ' + esc(l.dependsOn) : ''}</div>
             </div>
             <div class="layer-right">
                 ${badge(l.status || 'Pending')}
@@ -193,7 +179,15 @@ function finishStream() {
 
 async function refresh() {
     const data = await api(`/api/v1/deployments/${deploymentId}/runs/${runId}`);
-    if (!data || data.error) return;
+    if (!data) return;
+    if (data.error) {
+        // Keep showing the last good state; only say something when there is nothing to show yet.
+        if (!run) {
+            document.getElementById('pipeline').innerHTML = errorState(data.message);
+            document.getElementById('logPane').textContent = '';
+        }
+        return;
+    }
     run = data;
     renderMeta();
     renderPipeline();
@@ -211,7 +205,8 @@ async function refresh() {
 
 async function cancelRun() {
     if (!confirm('Cancel this run?')) return;
-    await api(`/api/v1/deployments/${deploymentId}/runs/${runId}/cancel`, { method: 'POST' });
+    const res = await api(`/api/v1/deployments/${deploymentId}/runs/${runId}/cancel`, { method: 'POST' });
+    if (res && res.error) { toast(res.message, 'error'); return; }
     toast('Cancel requested');
     refresh();
 }
@@ -219,6 +214,7 @@ async function cancelRun() {
 (async () => {
     const dep = await api(`/api/v1/deployments/${deploymentId}`);
     if (dep && !dep.error) document.getElementById('runTitle').textContent = `Run — ${dep.name}`;
+    else if (dep && dep.error) document.getElementById('runTitle').textContent = 'Run';
     await refresh();
     if (run && ACTIVE.includes(run.status)) {
         streamLogs();

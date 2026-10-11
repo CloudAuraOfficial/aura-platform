@@ -78,28 +78,19 @@
 const token = localStorage.getItem('aura_token');
 if (!token) window.location.href = '/dashboard/login';
 
-async function api(path, opts = {}) {
-    const res = await fetch(path, {
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        ...opts
-    });
-    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
-    if (res.status === 204) return {};
-    return await res.json();
-}
+const api = auraApi;
 
-function toast(msg, type = 'success') {
-    const el = document.createElement('div');
-    el.className = `toast toast-${type}`;
-    el.textContent = msg;
-    document.body.appendChild(el);
-    setTimeout(() => el.remove(), 3000);
-}
+function toast(msg, type = 'success') { auraToast(msg, type); }
+
+// Experiments by id, filled on each list load. Rows read from here instead of inlining JSON into onclick.
+let experimentsById = {};
 
 function badge(status) {
     const map = { Draft: 'muted', Running: 'success', Paused: 'warning', Concluded: 'info' };
-    return `<span class="badge badge-${map[status] || 'muted'}">${status}</span>`;
+    return `<span class="badge badge-${map[status] || 'muted'}">${esc(status)}</span>`;
 }
+
+function openEditById(id) { const e = experimentsById[id]; if (e) openEdit(e); }
 
 function closeModal() { document.getElementById('modal').classList.remove('open'); }
 
@@ -205,19 +196,24 @@ async function submitConclude(ev) {
 async function viewResults(id) {
     const data = await api(`/api/v1/experiments/${id}/results`);
     if (!data) return;
+    document.getElementById('resultsModal').classList.add('open');
+    if (data.error) {
+        document.getElementById('resultsContent').innerHTML = errorState(data.message);
+        return;
+    }
 
-    let html = `<h3>${data.name}</h3><p>Metric: <code>${data.metricName}</code></p>`;
+    let html = `<h3>${esc(data.name)}</h3><p>Metric: <code>${esc(data.metricName)}</code></p>`;
 
-    const variants = Object.entries(data.variants);
+    const variants = Object.entries(data.variants || {});
     if (variants.length === 0) {
-        html += '<div class="empty">No data collected yet</div>';
+        html += emptyState('No data has been recorded for this experiment yet. Results appear once variants report measurements.');
     } else {
         const maxMean = Math.max(...variants.map(([,v]) => v.mean)) || 1;
         html += '<table><thead><tr><th>Variant</th><th>N</th><th>Mean</th><th>StdDev</th><th>Min</th><th>Max</th><th></th></tr></thead><tbody>';
         for (const [name, v] of variants) {
             const pct = (v.mean / maxMean * 100).toFixed(0);
             html += `<tr>
-                <td><strong>${name}</strong></td>
+                <td><strong>${esc(name)}</strong></td>
                 <td>${v.sampleSize}</td>
                 <td>${v.mean.toFixed(4)}</td>
                 <td>${v.stdDev.toFixed(4)}</td>
@@ -245,14 +241,24 @@ async function viewResults(id) {
 }
 
 async function loadExperiments() {
+    const content = document.getElementById('content');
     const data = await api('/api/v1/experiments?limit=100');
-    if (!data || data.items.length === 0) {
-        document.getElementById('content').innerHTML = '<div class="empty">No experiments yet. Create your first one!</div>';
+    if (!data) return;
+    if (data.error) {
+        content.innerHTML = errorState(data.message);
+        return;
+    }
+    const items = data.items || [];
+    experimentsById = Object.fromEntries(items.map(e => [e.id, e]));
+    if (items.length === 0) {
+        content.innerHTML = emptyState(
+            'Experiments compare variants of a change against a metric, so you can see which one wins.',
+            '<button class="btn btn-primary" onclick="openCreate()">+ New Experiment</button>');
         return;
     }
 
     let html = '<table><thead><tr><th>Name</th><th>Project</th><th>Status</th><th>Metric</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
-    for (const e of data.items) {
+    for (const e of items) {
         const created = new Date(e.createdAt).toLocaleDateString();
         let actions = `<button class="btn btn-secondary btn-sm" onclick="viewResults('${e.id}')">Results</button> `;
 
@@ -266,14 +272,14 @@ async function loadExperiments() {
             actions += `<button class="btn btn-danger btn-sm" onclick="openConclude('${e.id}')">Conclude</button> `;
         }
         if (e.status === 'Draft') {
-            actions += `<button class="btn btn-secondary btn-sm" onclick='openEdit(${JSON.stringify(e)})'>Edit</button> `;
+            actions += `<button class="btn btn-secondary btn-sm" onclick="openEditById('${e.id}')">Edit</button> `;
         }
 
         html += `<tr>
-            <td>${e.name}</td>
-            <td><code>${e.project}</code></td>
+            <td>${esc(e.name)}</td>
+            <td><code>${esc(e.project)}</code></td>
             <td>${badge(e.status)}</td>
-            <td><code>${e.metricName}</code></td>
+            <td><code>${esc(e.metricName)}</code></td>
             <td>${created}</td>
             <td class="actions">${actions}</td>
         </tr>`;
@@ -281,18 +287,18 @@ async function loadExperiments() {
     html += '</tbody></table>';
 
     // Show concluded experiments with conclusions
-    const concluded = data.items.filter(e => e.status === 'Concluded' && e.conclusion);
+    const concluded = items.filter(e => e.status === 'Concluded' && e.conclusion);
     if (concluded.length > 0) {
         html += '<h2 style="margin-top:24px">Conclusions</h2>';
         for (const e of concluded) {
             html += `<div style="padding:12px;margin-bottom:8px;border:1px solid var(--border);border-radius:6px">
-                <strong>${e.name}</strong><br/>
-                <small>${e.conclusion}</small>
+                <strong>${esc(e.name)}</strong><br/>
+                <small>${esc(e.conclusion)}</small>
             </div>`;
         }
     }
 
-    document.getElementById('content').innerHTML = html;
+    content.innerHTML = html;
 }
 
 loadExperiments();

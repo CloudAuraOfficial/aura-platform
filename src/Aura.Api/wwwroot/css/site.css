@@ -172,6 +172,13 @@ pre {
 }
 
 .empty { text-align: center; padding: 2rem; color: var(--muted); }
+.empty-state { text-align: center; padding: 2.5rem 1rem; color: var(--muted); }
+.empty-state p { margin-bottom: 1rem; }
+.btn-warning { background: var(--warning); color: #111; }
+.btn-warning:hover { background: #d97706; }
+.validate-panel { padding: 0.5rem 0.75rem; }
+.validate-panel ul { margin: 0.5rem 0 0 1.25rem; }
+.validate-row td { padding-top: 0; }
 
 /* Toolbar */
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; }
@@ -234,6 +241,7 @@ pre {
 }
 .toast-success { background: rgba(34,197,94,0.9); color: #fff; }
 .toast-error { background: rgba(239,68,68,0.9); color: #fff; }
+.toast span + a { color: #fff; font-weight: 600; margin-left: 0.75rem; text-decoration: underline; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
 /* ── Run Theater (live run-detail view) ───────────── */
