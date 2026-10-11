@@ -17,7 +17,11 @@ public sealed class EssenceValidator : IEssenceValidator
     // created from: a cycle, an unknown runPolicy or executor, or an empty layer set would otherwise
     // only fail later, at run creation. Any parser exception counts as an invalid output. Letting one
     // escape would skip the retry loop and the usage row.
-    internal EssenceCheck Validate(string essenceJson, CloudProvider cloud, Func<string, List<DeploymentLayer>> parse)
+    public EssenceCheck CheckRunnable(string essenceJson) =>
+        Validate(essenceJson, null, json => DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.Empty));
+
+    // A null cloud skips the cloud-scope check; the EmissionLoad and unknown-type checks still apply.
+    internal EssenceCheck Validate(string essenceJson, CloudProvider? cloud, Func<string, List<DeploymentLayer>> parse)
     {
         JsonDocument doc;
         try

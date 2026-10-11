@@ -21,15 +21,17 @@ public class DeploymentsController : ControllerBase
     private readonly ITenantContext _tenant;
     private readonly IDeploymentOrchestrationService _orchestration;
     private readonly ICloudCostEstimatorFactory _estimatorFactory;
+    private readonly IDeploymentValidationService _validation;
 
     public DeploymentsController(
         AuraDbContext db, ITenantContext tenant, IDeploymentOrchestrationService orchestration,
-        ICloudCostEstimatorFactory estimatorFactory)
+        ICloudCostEstimatorFactory estimatorFactory, IDeploymentValidationService validation)
     {
         _db = db;
         _tenant = tenant;
         _orchestration = orchestration;
         _estimatorFactory = estimatorFactory;
+        _validation = validation;
     }
 
     [HttpGet]
@@ -159,7 +161,8 @@ public class DeploymentsController : ControllerBase
         if (deployment is null)
             return NotFound(new ErrorResponse("not_found", "Deployment not found.", 404));
 
-        return Ok(new { IsValid = true, Message = "Deployment structure is valid." });
+        var result = await _validation.ValidateAsync(deployment);
+        return Ok(result);
     }
 
     [HttpPost("{id:guid}/runs")]

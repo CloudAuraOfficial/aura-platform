@@ -26,4 +26,10 @@ public interface IEssenceValidator
     /// operation matches it. Input that is not a JSON object with a layers object passes; structure is not checked here.
     /// </summary>
     EssenceCheck CheckOperationTypes(string essenceJson);
+
+    /// <summary>
+    /// Deployment validate: the parser run creation uses, then the operation-type checks of save. No cloud scope,
+    /// because a run accepts layers on any cloud. Returns the same reasons run creation and save would.
+    /// </summary>
+    EssenceCheck CheckRunnable(string essenceJson);
 }

@@ -43,6 +43,69 @@ public class EssenceValidatorTests
             .GetProperty("operationType").GetString();
     }
 
+    // ---- deployment validate: run creation's parser and operation-type checks, no cloud scope ----
+
+    [Fact]
+    public void CheckRunnable_accepts_layers_on_any_cloud_as_a_run_does()
+    {
+        // The Worker gives each layer its own cloud account, so a run accepts an AWS layer in an Azure essence.
+        var json = Essence($"{KnownLayer}, {Layer("ec2", "CreateEc2Instance")}");
+
+        Assert.Null(Validator.CheckRunnable(json).Error);
+    }
+
+    [Fact]
+    public void CheckRunnable_rejects_an_unknown_operation_type_and_names_the_layer()
+    {
+        var reason = Validator.CheckRunnable(Essence(Layer("bogus", "NotARealOperation"))).Error;
+
+        Assert.NotNull(reason);
+        Assert.Contains("layer 'bogus' uses 'NotARealOperation'", reason);
+        Assert.Contains("Valid types:", reason);
+    }
+
+    [Fact]
+    public void CheckRunnable_rejects_an_emissionload_type_its_container_cannot_run()
+    {
+        var emission = "\"load\": { \"isEnabled\": true, \"executorType\": \"emissionload\", \"operationType\": \"CreateEc2Instance\", \"parameters\": {}, \"dependsOn\": [] }";
+
+        var reason = Validator.CheckRunnable(Essence(emission)).Error;
+
+        Assert.NotNull(reason);
+        Assert.Contains("cannot run", reason);
+    }
+
+    [Fact]
+    public void CheckRunnable_rejects_a_dependency_cycle_the_parser_would_refuse()
+    {
+        var a = "\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"b\"] }";
+        var b = "\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"a\"] }";
+
+        Assert.Equal("Cycle detected in layer dependencies.", Validator.CheckRunnable(Essence($"{a}, {b}")).Error);
+    }
+
+    [Fact]
+    public void CheckRunnable_rejects_an_unknown_runPolicy_the_parser_would_refuse()
+    {
+        var layer = "\"create-rg\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [], \"runPolicy\": \"sometimes\" }";
+
+        Assert.Contains("unknown runPolicy", Validator.CheckRunnable(Essence(layer)).Error);
+    }
+
+    [Fact]
+    public void CheckRunnable_rejects_an_essence_with_no_enabled_layers()
+    {
+        var disabled = "\"create-rg\": { \"isEnabled\": false, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [] }";
+
+        Assert.Equal("essence has no enabled layers", Validator.CheckRunnable(Essence(disabled)).Error);
+    }
+
+    [Fact]
+    public void CheckRunnable_rejects_a_non_object_root()
+    {
+        Assert.Equal("response is valid JSON but not an object", Validator.CheckRunnable("[]").Error);
+    }
+
     // ---- generation: checked against the requested cloud ----
 
     [Fact]

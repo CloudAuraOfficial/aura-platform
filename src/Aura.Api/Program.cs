@@ -113,6 +113,7 @@ builder.Services.AddSingleton<ICryptoService>(new AesCryptoService(encryptionKey
 builder.Services.AddHttpClient("cloud-cred-test");
 builder.Services.AddScoped<ICloudCredentialTester, CloudCredentialTester>();
 builder.Services.AddScoped<IDeploymentOrchestrationService, DeploymentOrchestrationService>();
+builder.Services.AddScoped<IDeploymentValidationService, DeploymentValidationService>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.AzureCostEstimator>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.AwsCostEstimator>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.GcpCostEstimator>();
