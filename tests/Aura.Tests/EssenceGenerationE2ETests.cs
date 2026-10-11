@@ -356,15 +356,12 @@ public class EssenceGenerationE2ETests
     }
 
     [Fact]
-    public void Unexpected_parser_exception_is_reported_as_invalid_output_not_thrown()
+    public void Unexpected_parser_exception_escapes_validate_so_it_is_not_reported_as_invalid_output()
     {
-        // ParseAndSortLayers only throws the types it documents today. Whatever a parser throws,
-        // the retry loop must see a rejection, so nothing escapes Validate.
-        var reason = new EssenceValidator().Validate(
-            ValidEssence, CloudProvider.Azure, _ => throw new NullReferenceException("simulated parser bug")).Error;
-
-        Assert.NotNull(reason);
-        Assert.Contains("simulated parser bug", reason);
+        // Only InvalidEssenceException is a reason for the user. Any other parser exception is a bug, and
+        // escapes like a provider bug does: usage is still logged in the finally, and the caller returns a 500.
+        Assert.Throws<NullReferenceException>(() => new EssenceValidator().Validate(
+            ValidEssence, CloudProvider.Azure, canonicalize: true, _ => throw new NullReferenceException("simulated parser bug")));
     }
 
     // ---- (d) provider timeout / HTTP error ----

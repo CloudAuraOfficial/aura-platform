@@ -69,7 +69,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
             return null;
 
         if (prop.ValueKind != JsonValueKind.String)
-            throw new InvalidOperationException($"Layer '{layerName}': operationType must be a string.");
+            throw new InvalidEssenceException($"Layer '{layerName}': operationType must be a string.");
 
         return string.IsNullOrEmpty(prop.GetString()) ? null : prop.GetString();
     }
@@ -176,7 +176,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
                 if (policyText is null
                     || !Enum.GetNames<RunPolicy>().Contains(policyText, StringComparer.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException(
+                    throw new InvalidEssenceException(
                         $"Layer '{name}': unknown runPolicy '{rpProp}'. Valid values: onSuccess, always.");
                 }
                 runPolicy = Enum.Parse<RunPolicy>(policyText, ignoreCase: true);
@@ -248,7 +248,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         }
 
         if (sorted.Count != definitions.Count)
-            throw new InvalidOperationException("Cycle detected in layer dependencies.");
+            throw new InvalidEssenceException("Cycle detected in layer dependencies.");
 
         return sorted;
     }
@@ -260,7 +260,7 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
         "csharp_sdk" => ExecutorType.CSharpSdk,
         "operation" => ExecutorType.Operation,
         "emissionload" => ExecutorType.EmissionLoad,
-        _ => throw new InvalidOperationException($"Unknown executor type: {value}")
+        _ => throw new InvalidEssenceException($"Unknown executor type: {value}")
     };
 
     internal record LayerDefinition(

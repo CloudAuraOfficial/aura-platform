@@ -21,15 +21,17 @@ public class DeploymentsController : ControllerBase
     private readonly ITenantContext _tenant;
     private readonly IDeploymentOrchestrationService _orchestration;
     private readonly ICloudCostEstimatorFactory _estimatorFactory;
+    private readonly IDeploymentValidationService _validation;
 
     public DeploymentsController(
         AuraDbContext db, ITenantContext tenant, IDeploymentOrchestrationService orchestration,
-        ICloudCostEstimatorFactory estimatorFactory)
+        ICloudCostEstimatorFactory estimatorFactory, IDeploymentValidationService validation)
     {
         _db = db;
         _tenant = tenant;
         _orchestration = orchestration;
         _estimatorFactory = estimatorFactory;
+        _validation = validation;
     }
 
     [HttpGet]
@@ -153,13 +155,13 @@ public class DeploymentsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/validate")]
-    public async Task<IActionResult> Validate(Guid id)
+    public async Task<IActionResult> Validate(Guid id, CancellationToken ct)
     {
-        var deployment = await _db.Deployments.FindAsync(id);
+        var deployment = await _db.Deployments.FindAsync([id], ct);
         if (deployment is null)
             return NotFound(new ErrorResponse("not_found", "Deployment not found.", 404));
 
-        return Ok(new { IsValid = true, Message = "Deployment structure is valid." });
+        return Ok(await _validation.ValidateAsync(deployment, ct));
     }
 
     [HttpPost("{id:guid}/runs")]

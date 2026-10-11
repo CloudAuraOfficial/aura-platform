@@ -72,7 +72,7 @@ public class TopologicalSortTests
             ["B"] = new("B", ExecutorType.PowerShell, "{}", null, ["A"])
         };
 
-        Assert.Throws<InvalidOperationException>(
+        Assert.ThrowsAny<InvalidOperationException>(
             () => DeploymentOrchestrationService.TopologicalSort(defs));
     }
 

@@ -69,7 +69,7 @@ public class RunPolicyTests
             }
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
+        var ex = Assert.ThrowsAny<InvalidOperationException>(() =>
             DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.NewGuid()));
         Assert.Contains("unknown runPolicy", ex.Message);
     }
@@ -85,7 +85,7 @@ public class RunPolicyTests
             }
             """;
 
-        var ex = Assert.Throws<InvalidOperationException>(() =>
+        var ex = Assert.ThrowsAny<InvalidOperationException>(() =>
             DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.NewGuid()));
         Assert.Contains("unknown runPolicy", ex.Message);
     }
@@ -105,7 +105,7 @@ public class RunPolicyTests
               }
             }
             """;
-        var ex = Assert.Throws<InvalidOperationException>(
+        var ex = Assert.ThrowsAny<InvalidOperationException>(
             () => DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.NewGuid()));
         Assert.Contains("runPolicy", ex.Message);
         Assert.Contains("L1", ex.Message);
@@ -124,7 +124,7 @@ public class RunPolicyTests
               }
             }
             """;
-        Assert.Throws<InvalidOperationException>(
+        Assert.ThrowsAny<InvalidOperationException>(
             () => DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.NewGuid()));
     }
 
