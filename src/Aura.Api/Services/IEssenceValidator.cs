@@ -30,10 +30,11 @@ public interface IEssenceValidator
     EssenceCheck Validate(string essenceJson, CloudProvider? cloud, bool canonicalize = true);
 
     /// <summary>
-    /// Save, update and clone: every layer's operation type must be a known one, on any cloud, disabled layers
-    /// included. Essences may mix clouds, because the Worker gives each layer its own cloud account and does not
-    /// check that an operation matches it. Input that is not a JSON object with a layers object passes; structure
-    /// is not checked here.
+    /// Save, update and clone: the same checks as <see cref="Validate"/> with no cloud. Structure and the run
+    /// creation parser run first (so a cycle, an empty essence or a bad runPolicy is rejected at save, not at run
+    /// creation), then every layer's operation type must be a known one on any cloud, disabled layers included.
+    /// Essences may mix clouds, because the Worker gives each layer its own cloud account. Canonical casing is
+    /// stored when the essence is otherwise valid.
     /// </summary>
-    EssenceCheck CheckOperationTypes(string essenceJson);
+    EssenceCheck CheckForSave(string essenceJson);
 }

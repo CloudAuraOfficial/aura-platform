@@ -65,9 +65,9 @@ public class EssencesController : ControllerBase
         if (!accountExists)
             return BadRequest(new ErrorResponse("bad_request", "Cloud account not found.", 400));
 
-        var check = _validator.CheckOperationTypes(request.EssenceJson);
+        var check = _validator.CheckForSave(request.EssenceJson);
         if (check.Error is not null)
-            return RejectInvalidOperationType(check.Error, "create");
+            return RejectInvalidEssence(check.Error, "create");
 
         var essence = new Essence
         {
@@ -107,9 +107,9 @@ public class EssencesController : ControllerBase
         var essenceJson = request.EssenceJson;
         if (essenceJson is not null)
         {
-            var check = _validator.CheckOperationTypes(essenceJson);
+            var check = _validator.CheckForSave(essenceJson);
             if (check.Error is not null)
-                return RejectInvalidOperationType(check.Error, "update");
+                return RejectInvalidEssence(check.Error, "update");
             essenceJson = check.EssenceJson;
         }
 
@@ -288,9 +288,9 @@ public class EssencesController : ControllerBase
         if (source is null)
             return NotFound(new ErrorResponse("not_found", "Essence not found.", 404));
 
-        var check = _validator.CheckOperationTypes(source.EssenceJson);
+        var check = _validator.CheckForSave(source.EssenceJson);
         if (check.Error is not null)
-            return RejectInvalidOperationType(check.Error, "clone");
+            return RejectInvalidEssence(check.Error, "clone");
 
         var clone = new Essence
         {
@@ -359,9 +359,9 @@ public class EssencesController : ControllerBase
         return NoContent();
     }
 
-    // Standard 400 when essence JSON names an operationType the Worker cannot run. The reason
-    // names the layer and type, so it is safe to return; it is also logged for operators.
-    private IActionResult RejectInvalidOperationType(string reason, string action)
+    // Standard 400 when essence JSON would not run: bad shape, a parse or dependency error, or an operationType the
+    // Worker cannot run. The reasons name the layer and problem, so they are safe to return; they are also logged.
+    private IActionResult RejectInvalidEssence(string reason, string action)
     {
         _logger.LogWarning(
             "Essence {Action} rejected: tenant={TenantId}, user={UserId}, reason={Reason}",

@@ -10,14 +10,28 @@ namespace Aura.Api.Services;
 
 public sealed class EssenceValidator : IEssenceValidator
 {
+    private static readonly Func<string, List<DeploymentLayer>> RunCreationParser =
+        json => DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.Empty);
+
     public EssenceCheck Validate(string essenceJson, CloudProvider? cloud, bool canonicalize = true) =>
-        Validate(essenceJson, cloud, canonicalize, json => DeploymentOrchestrationService.ParseAndSortLayers(json, Guid.Empty));
+        Validate(essenceJson, cloud, canonicalize, RunCreationParser);
+
+    // Save, update and clone. Checks the same things as generation and deployment, except that the cloud is not
+    // known here: every operation type must be valid on some cloud, and disabled layers are checked too, since
+    // enabling one later should not be the first time its type is seen. Essences may mix clouds, because the
+    // Worker gives each layer its own cloud account.
+    public EssenceCheck CheckForSave(string essenceJson) =>
+        Check(essenceJson, cloud: null, enabledOnly: false, canonicalize: true, parse: RunCreationParser);
 
     // Collects every problem: shape first, then the deployment parser (the one run creation uses), then the
     // operation types. The parser only runs on input the shape check accepted, so an InvalidEssenceException
     // from it is a reason written for the user. Any other exception is a bug and propagates, so the caller
     // returns a 500 instead of an answer that looks like a verdict on the essence.
     internal EssenceCheck Validate(string essenceJson, CloudProvider? cloud, bool canonicalize,
+        Func<string, List<DeploymentLayer>> parse) =>
+        Check(essenceJson, cloud, enabledOnly: true, canonicalize: canonicalize, parse: parse);
+
+    private static EssenceCheck Check(string essenceJson, CloudProvider? cloud, bool enabledOnly, bool canonicalize,
         Func<string, List<DeploymentLayer>> parse)
     {
         JsonDocument doc;
@@ -54,28 +68,9 @@ public sealed class EssenceValidator : IEssenceValidator
                 }
             }
 
-            var outcome = Walk(root, cloud, enabledOnly: true);
+            var outcome = Walk(root, cloud, enabledOnly);
             problems.AddRange(outcome.Problems);
             return Finish(essenceJson, problems, outcome.Renames, canonicalize);
-        }
-    }
-
-    public EssenceCheck CheckOperationTypes(string essenceJson)
-    {
-        JsonDocument doc;
-        try
-        {
-            doc = JsonDocument.Parse(essenceJson);
-        }
-        catch (JsonException)
-        {
-            return new EssenceCheck(essenceJson, []);
-        }
-
-        using (doc)
-        {
-            var outcome = Walk(doc.RootElement, cloud: null, enabledOnly: false);
-            return Finish(essenceJson, outcome.Problems, outcome.Renames, canonicalize: true);
         }
     }
 

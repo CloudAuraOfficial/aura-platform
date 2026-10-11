@@ -210,7 +210,7 @@ public class EssenceValidatorTests
             }
             """;
 
-        var check = Validator.CheckOperationTypes(json);
+        var check = Validator.CheckForSave(json);
 
         Assert.Null(check.Error);
         Assert.Equal(json, check.EssenceJson);
@@ -225,7 +225,7 @@ public class EssenceValidatorTests
             "\"rg\": { \"isEnabled\": true, \"operationType\": \"DeleteResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"gcs\"] }",
             "\"baseEssence\": { \"cloudProvider\": \"Aws\", \"defaultRegion\": \"us-east-1\" }");
 
-        Assert.Null(Validator.CheckOperationTypes(json).Error);
+        Assert.Null(Validator.CheckForSave(json).Error);
     }
 
     [Fact]
@@ -233,7 +233,7 @@ public class EssenceValidatorTests
     {
         var json = Essence($"{KnownLayer}, {Layer("deploy-mgr", "DeployDeploymentManager")}");
 
-        var reason = Validator.CheckOperationTypes(json).Error;
+        var reason = Validator.CheckForSave(json).Error;
 
         Assert.NotNull(reason);
         Assert.Contains("layer 'deploy-mgr' uses 'DeployDeploymentManager'", reason);
@@ -246,7 +246,7 @@ public class EssenceValidatorTests
         // A disabled layer never runs today, but enabling it later would fail at run time.
         var json = Essence($"{KnownLayer}, {Layer("off", "DeployDeploymentManager", enabled: false)}");
 
-        var reason = Validator.CheckOperationTypes(json).Error;
+        var reason = Validator.CheckForSave(json).Error;
 
         Assert.NotNull(reason);
         Assert.Contains("layer 'off' uses 'DeployDeploymentManager'", reason);
@@ -259,7 +259,7 @@ public class EssenceValidatorTests
             "\"a\": { \"isEnabled\": true, \"operationType\": \"createvm\", \"parameters\": {}, \"dependsOn\": [] }, " +
             "\"b\": { \"isEnabled\": true, \"executorType\": \"operation\", \"parameters\": { \"operationType\": \"deletevm\" }, \"dependsOn\": [] }");
 
-        var check = Validator.CheckOperationTypes(json);
+        var check = Validator.CheckForSave(json);
 
         Assert.Null(check.Error);
         Assert.Equal("CreateVM", StoredOperationType(check.EssenceJson, "a"));
@@ -273,13 +273,13 @@ public class EssenceValidatorTests
     {
         var json = Essence(KnownLayer);
 
-        Assert.Equal(json, Validator.CheckOperationTypes(json).EssenceJson);
+        Assert.Equal(json, Validator.CheckForSave(json).EssenceJson);
     }
 
     [Fact]
     public void Save_canonicalizes_an_emissionload_layer_so_the_case_sensitive_entrypoint_runs_it()
     {
-        var check = Validator.CheckOperationTypes(Essence("\"rg\": { \"isEnabled\": true, \"executorType\": \"emissionload\", \"operationType\": \"createresourcegroup\", \"parameters\": {}, \"dependsOn\": [] }"));
+        var check = Validator.CheckForSave(Essence("\"rg\": { \"isEnabled\": true, \"executorType\": \"emissionload\", \"operationType\": \"createresourcegroup\", \"parameters\": {}, \"dependsOn\": [] }"));
 
         Assert.Null(check.Error);
         Assert.Equal("CreateResourceGroup", StoredOperationType(check.EssenceJson, "rg"));
@@ -290,7 +290,7 @@ public class EssenceValidatorTests
     {
         var json = Essence(Layer("net", "CreateVirtualNetwork", executorType: "emissionload"));
 
-        var reason = Validator.CheckOperationTypes(json).Error;
+        var reason = Validator.CheckForSave(json).Error;
 
         Assert.NotNull(reason);
         Assert.Contains("layer 'net' uses 'CreateVirtualNetwork'", reason);
@@ -301,7 +301,7 @@ public class EssenceValidatorTests
     {
         var json = Essence("\"s\": { \"isEnabled\": true, \"executorType\": \"powershell\", \"scriptPath\": \"x.ps1\", \"parameters\": { \"operationType\": \"Anything at all\" }, \"dependsOn\": [] }");
 
-        var check = Validator.CheckOperationTypes(json);
+        var check = Validator.CheckForSave(json);
 
         Assert.Null(check.Error);
         Assert.Equal(json, check.EssenceJson);
@@ -312,7 +312,7 @@ public class EssenceValidatorTests
     {
         var json = Essence("\"s\": { \"isEnabled\": true, \"scriptPath\": \"x.ps1\", \"parameters\": { \"operationType\": \"Bogus\" }, \"dependsOn\": [] }");
 
-        Assert.Null(Validator.CheckOperationTypes(json).Error);
+        Assert.Null(Validator.CheckForSave(json).Error);
     }
 
     [Fact]
@@ -320,7 +320,7 @@ public class EssenceValidatorTests
     {
         var json = Essence("\"p\": { \"isEnabled\": true, \"operationType\": 42, \"parameters\": {}, \"dependsOn\": [] }");
 
-        var reason = Validator.CheckOperationTypes(json).Error;
+        var reason = Validator.CheckForSave(json).Error;
 
         Assert.NotNull(reason);
         Assert.Contains("Layer 'p': operationType must be a string.", reason);
@@ -331,7 +331,7 @@ public class EssenceValidatorTests
     {
         var json = Essence("\"p\": { \"isEnabled\": true, \"executorType\": \"operation\", \"parameters\": { \"operationType\": 42 }, \"dependsOn\": [] }");
 
-        var reason = Validator.CheckOperationTypes(json).Error;
+        var reason = Validator.CheckForSave(json).Error;
 
         Assert.NotNull(reason);
         Assert.Contains("Layer 'p': parameters.operationType must be a string.", reason);
@@ -344,23 +344,31 @@ public class EssenceValidatorTests
     {
         var json = Essence($"\"p\": {{ \"isEnabled\": true, {operationTypeProperty}, \"parameters\": {{}}, \"dependsOn\": [] }}");
 
-        Assert.Null(Validator.CheckOperationTypes(json).Error);
+        Assert.Null(Validator.CheckForSave(json).Error);
     }
 
     [Fact]
-    public void Save_passes_layers_without_a_type_and_essences_without_layers()
+    public void Save_passes_script_layers_without_a_type()
     {
-        Assert.Null(Validator.CheckOperationTypes(Essence("\"s\": { \"isEnabled\": true, \"scriptPath\": \"x.ps1\", \"dependsOn\": [] }")).Error);
-        Assert.Null(Validator.CheckOperationTypes("{}").Error);
+        Assert.Null(Validator.CheckForSave(Essence("\"s\": { \"isEnabled\": true, \"scriptPath\": \"x.ps1\", \"dependsOn\": [] }")).Error);
+    }
+
+    [Fact]
+    public void Save_rejects_an_essence_without_layers()
+    {
+        var reason = Validator.CheckForSave("{}").Error;
+
+        Assert.Equal("JSON is valid but missing 'layers' property", reason);
     }
 
     [Theory]
-    [InlineData("[]")]
-    [InlineData("\"just a string\"")]
-    [InlineData("null")]
-    public void Save_passes_valid_json_that_is_not_an_object_without_throwing(string json)
+    [InlineData("[]", "response is valid JSON but not an object")]
+    [InlineData("\"just a string\"", "response is valid JSON but not an object")]
+    [InlineData("null", "response is valid JSON but not an object")]
+    [InlineData("{ \"layers\": [] }", "'layers' must be an object")]
+    public void Save_rejects_json_that_is_not_an_essence_without_throwing(string json, string reason)
     {
-        Assert.Null(Validator.CheckOperationTypes(json).Error);
+        Assert.Equal(reason, Validator.CheckForSave(json).Error);
     }
 
     [Fact]
@@ -368,20 +376,98 @@ public class EssenceValidatorTests
     {
         var json = Essence("\"a\": { \"isEnabled\": true, \"operationType\": \"createvm\", \"parameters\": { \"note\": \"ops — café\" }, \"dependsOn\": [] }");
 
-        var stored = Validator.CheckOperationTypes(json).EssenceJson;
+        var stored = Validator.CheckForSave(json).EssenceJson;
 
         Assert.Contains("ops — café", stored);
         Assert.Equal("CreateVM", StoredOperationType(stored, "a"));
     }
 
     [Fact]
-    public void Save_passes_input_that_is_not_json()
+    public void Save_rejects_input_that_is_not_json()
     {
-        // Save does not run the full check; structure is validated by the generation path, not here.
-        var check = Validator.CheckOperationTypes("not json");
+        Assert.Equal("Essence JSON is not valid.", Validator.CheckForSave("not json").Error);
+    }
 
-        Assert.Null(check.Error);
-        Assert.Equal("not json", check.EssenceJson);
+    // ---- save: the run creation parser runs first, so what save rejects is what run creation would reject ----
+
+    [Fact]
+    public void Save_rejects_a_dependency_cycle_and_names_the_problem()
+    {
+        var json = Essence(
+            "\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"b\"] }, " +
+            "\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"a\"] }");
+
+        Assert.Equal(new[] { "Cycle detected in layer dependencies." }, Validator.CheckForSave(json).Errors);
+    }
+
+    [Fact]
+    public void Save_rejects_an_essence_whose_layers_are_all_disabled()
+    {
+        var json = Essence(Layer("off", "CreateResourceGroup", enabled: false));
+
+        Assert.Equal(new[] { "essence has no enabled layers" }, Validator.CheckForSave(json).Errors);
+    }
+
+    [Fact]
+    public void Save_rejects_an_empty_layers_object()
+    {
+        Assert.Equal(new[] { "essence has no enabled layers" }, Validator.CheckForSave(Essence("")).Errors);
+    }
+
+    [Fact]
+    public void Save_rejects_an_unknown_run_policy_and_names_the_layer()
+    {
+        var json = Essence("\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"runPolicy\": \"sometimes\", \"parameters\": {}, \"dependsOn\": [] }");
+
+        var reason = Validator.CheckForSave(json).Error;
+
+        Assert.NotNull(reason);
+        Assert.Contains("unknown runPolicy", reason);
+    }
+
+    [Fact]
+    public void Save_rejects_a_dependency_on_a_missing_layer()
+    {
+        var json = Essence("\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"ghost\"] }");
+
+        var reason = Validator.CheckForSave(json).Error;
+
+        Assert.NotNull(reason);
+        Assert.Contains("Layer 'a' depends on 'ghost'", reason);
+    }
+
+    [Fact]
+    public void Save_reports_every_structural_problem_not_just_the_first()
+    {
+        var json = Essence(
+            "\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"b\"] }, " +
+            "\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"a\"] }, " +
+            "\"c\": { \"isEnabled\": true, \"operationType\": \"DeployDeploymentManager\", \"parameters\": {}, \"dependsOn\": [] }");
+
+        var errors = Validator.CheckForSave(json).Errors;
+
+        Assert.Equal(2, errors.Count);
+        Assert.Contains("Cycle detected in layer dependencies.", errors);
+        Assert.Contains(errors, e => e.Contains("layer 'c' uses 'DeployDeploymentManager'"));
+    }
+
+    [Fact]
+    public void Save_rejects_a_non_boolean_is_enabled()
+    {
+        var json = Essence("\"a\": { \"isEnabled\": \"yes\", \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [] }");
+
+        Assert.Equal(new[] { "Layer 'a': isEnabled must be true or false." }, Validator.CheckForSave(json).Errors);
+    }
+
+    [Fact]
+    public void Save_accepts_a_valid_essence_and_stores_it_unchanged_when_no_rename_is_needed()
+    {
+        var json = Essence($"{KnownLayer}, {Layer("ec2", "CreateEc2Instance")}");
+
+        var check = Validator.CheckForSave(json);
+
+        Assert.Empty(check.Errors);
+        Assert.Equal(json, check.EssenceJson);
     }
 
     // ---- deployment validation: the parser run creation uses, then the operation types on any cloud ----
@@ -401,7 +487,7 @@ public class EssenceValidatorTests
         var json = Essence($"{KnownLayer}, {Layer("ec2", "CreateEc2Instance")}");
 
         Assert.Null(ValidateForDeployment(json).Error);
-        Assert.Null(Validator.CheckOperationTypes(json).Error);
+        Assert.Null(Validator.CheckForSave(json).Error);
     }
 
     [Fact]
