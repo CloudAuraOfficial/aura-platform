@@ -384,48 +384,56 @@ public class EssenceValidatorTests
         Assert.Equal("not json", check.EssenceJson);
     }
 
-    // ---- deployment validation: the parser run creation uses, plus the save path's operation-type checks ----
+    // ---- deployment validation: the parser run creation uses, then the operation types on any cloud ----
+
+    private static EssenceCheck ValidateForDeployment(string json) => Validator.Validate(json, cloud: null, canonicalize: false);
 
     [Fact]
-    public void CheckRunnable_accepts_an_essence_run_creation_can_use()
+    public void Deployment_accepts_an_essence_run_creation_can_use()
     {
-        Assert.Null(Validator.CheckRunnable(Essence(KnownLayer)).Error);
+        Assert.Null(ValidateForDeployment(Essence(KnownLayer)).Error);
     }
 
     [Fact]
-    public void CheckRunnable_accepts_a_mixed_cloud_essence_because_save_does()
+    public void Deployment_accepts_a_mixed_cloud_essence_because_save_does()
     {
         // Save accepts layers from several clouds, so validation must not reject what save stored.
         var json = Essence($"{KnownLayer}, {Layer("ec2", "CreateEc2Instance")}");
 
-        Assert.Null(Validator.CheckRunnable(json).Error);
+        Assert.Null(ValidateForDeployment(json).Error);
         Assert.Null(Validator.CheckOperationTypes(json).Error);
     }
 
     [Fact]
-    public void CheckRunnable_reports_a_dependency_cycle_the_parser_rejects()
+    public void Deployment_reports_a_dependency_cycle_the_parser_rejects()
     {
         var json = Essence(
             "\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"b\"] }, " +
             "\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"a\"] }");
 
-        var reason = Validator.CheckRunnable(json).Error;
-
-        Assert.Equal("Cycle detected in layer dependencies.", reason);
+        Assert.Equal(new[] { "Cycle detected in layer dependencies." }, ValidateForDeployment(json).Errors);
     }
 
     [Fact]
-    public void CheckRunnable_reports_an_unknown_run_policy_the_parser_rejects()
+    public void Deployment_reports_an_unknown_run_policy_the_parser_rejects()
     {
         var json = Essence("\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"runPolicy\": \"sometimes\", \"parameters\": {}, \"dependsOn\": [] }");
 
-        Assert.Contains("unknown runPolicy", Validator.CheckRunnable(json).Error);
+        Assert.Contains("unknown runPolicy", ValidateForDeployment(json).Error);
     }
 
     [Fact]
-    public void CheckRunnable_reports_an_unknown_operation_type_and_names_the_layer()
+    public void Deployment_reports_an_unknown_executor_type_with_the_parser_message()
     {
-        var reason = Validator.CheckRunnable(Essence(Layer("x", "Nope"))).Error;
+        var json = Essence("\"a\": { \"isEnabled\": true, \"executorType\": \"cobol\", \"scriptPath\": \"x\", \"parameters\": {}, \"dependsOn\": [] }");
+
+        Assert.Equal(new[] { "Unknown executor type: cobol" }, ValidateForDeployment(json).Errors);
+    }
+
+    [Fact]
+    public void Deployment_reports_an_unknown_operation_type_and_names_the_layer()
+    {
+        var reason = ValidateForDeployment(Essence(Layer("x", "Nope"))).Error;
 
         Assert.NotNull(reason);
         Assert.Contains("Unknown operationType", reason);
@@ -433,34 +441,107 @@ public class EssenceValidatorTests
     }
 
     [Fact]
-    public void CheckRunnable_reports_an_emissionload_type_its_container_cannot_run()
+    public void Deployment_reports_an_emissionload_type_its_container_cannot_run()
     {
         var json = Essence(Layer("net", "CreateVirtualNetwork", executorType: "emissionload"));
 
-        var reason = Validator.CheckRunnable(json).Error;
+        var reason = ValidateForDeployment(json).Error;
 
         Assert.NotNull(reason);
         Assert.Contains("layer 'net' uses 'CreateVirtualNetwork'", reason);
     }
 
     [Fact]
-    public void CheckRunnable_reports_malformed_json_without_parser_internals()
+    public void Deployment_reports_every_problem_when_a_cycle_and_an_unknown_type_are_both_present()
     {
-        Assert.Equal("Essence JSON is not valid.", Validator.CheckRunnable("{ not json").Error);
+        var json = Essence(
+            "\"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"b\"] }, " +
+            "\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"a\"] }, " +
+            Layer("c", "Nope"));
+
+        var errors = ValidateForDeployment(json).Errors;
+
+        Assert.Equal(2, errors.Count);
+        Assert.Equal("Cycle detected in layer dependencies.", errors[0]);
+        Assert.Contains("layer 'c' uses 'Nope'", errors[1]);
     }
 
     [Fact]
-    public void CheckRunnable_rejects_a_non_object_root()
+    public void Deployment_rejects_an_essence_with_no_enabled_layers_including_an_empty_layer_set()
     {
-        Assert.NotNull(Validator.CheckRunnable("[]").Error);
+        Assert.Equal("essence has no enabled layers", ValidateForDeployment(Essence(Layer("off", "CreateResourceGroup", enabled: false))).Error);
+        Assert.Equal("essence has no enabled layers", ValidateForDeployment("{ \"layers\": {} }").Error);
     }
 
     [Fact]
-    public void CheckRunnable_returns_the_canonical_casing_the_save_path_stores()
+    public void Deployment_rejects_an_empty_object_as_missing_layers()
     {
-        var check = Validator.CheckRunnable(Essence(Layer("rg", "createresourcegroup")));
+        Assert.Equal("JSON is valid but missing 'layers' property", ValidateForDeployment("{}").Error);
+    }
+
+    [Fact]
+    public void Deployment_does_not_check_operation_types_on_disabled_layers_that_run_creation_skips()
+    {
+        // A disabled legacy layer with an unknown type is runnable, so it must not be reported invalid.
+        var json = Essence($"{KnownLayer}, {Layer("legacy", "RetiredOperation", enabled: false)}");
+
+        Assert.Null(ValidateForDeployment(json).Error);
+    }
+
+    [Fact]
+    public void Deployment_returns_the_canonical_casing_when_asked_to_canonicalize()
+    {
+        var check = Validator.Validate(Essence(Layer("rg", "createresourcegroup")), cloud: null);
 
         Assert.Null(check.Error);
         Assert.Equal("CreateResourceGroup", StoredOperationType(check.EssenceJson, "rg"));
+    }
+
+    [Fact]
+    public void Deployment_skips_the_rewrite_and_returns_the_input_unchanged_when_not_asked()
+    {
+        var json = Essence(Layer("rg", "createresourcegroup"));
+
+        var check = ValidateForDeployment(json);
+
+        Assert.Null(check.Error);
+        Assert.Equal(json, check.EssenceJson);
+    }
+
+    [Fact]
+    public void Deployment_reports_malformed_json_without_parser_internals()
+    {
+        Assert.Equal("Essence JSON is not valid.", ValidateForDeployment("{ not json").Error);
+    }
+
+    [Fact]
+    public void Deployment_rejects_a_non_object_root_with_the_exact_message()
+    {
+        Assert.Equal("response is valid JSON but not an object", ValidateForDeployment("[]").Error);
+    }
+
+    [Theory]
+    [InlineData("\"layers\": []", "'layers' must be an object")]
+    [InlineData("\"layers\": { \"a\": 5 }", "Layer 'a' must be an object.")]
+    [InlineData("\"layers\": { \"a\": { \"isEnabled\": \"yes\" } }", "Layer 'a': isEnabled must be true or false.")]
+    [InlineData("\"layers\": { \"a\": { \"isEnabled\": null } }", "Layer 'a': isEnabled must be true or false.")]
+    [InlineData("\"layers\": { \"a\": { \"isEnabled\": true, \"executorType\": 3, \"parameters\": {} } }", "Layer 'a': executorType must be a string.")]
+    [InlineData("\"layers\": { \"a\": { \"isEnabled\": true, \"scriptPath\": 3, \"parameters\": {} } }", "Layer 'a': scriptPath must be a string.")]
+    [InlineData("\"layers\": { \"a\": { \"isEnabled\": true, \"dependsOn\": [1], \"scriptPath\": \"x\", \"parameters\": {} } }", "Layer 'a': dependsOn must list layer names.")]
+    [InlineData("\"layers\": { \"a\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": [] } }", "Layer 'a': parameters must be an object when operationType is set.")]
+    public void Deployment_names_a_malformed_shape_with_a_curated_message(string layers, string expected)
+    {
+        var json = $"{{ {AzureBase}, {layers} }}";
+
+        Assert.Equal(new[] { expected }, ValidateForDeployment(json).Errors);
+    }
+
+    [Fact]
+    public void Deployment_lets_an_unexpected_parser_exception_propagate()
+    {
+        // Only InvalidEssenceException is a reason for the user. Anything else is a bug and must not become a verdict.
+        Assert.Throws<NotSupportedException>(() => Validator.Validate(
+            Essence(KnownLayer), null, canonicalize: false,
+            _ => throw new NotSupportedException("boom")));
     }
 }

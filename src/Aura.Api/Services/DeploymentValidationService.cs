@@ -22,28 +22,36 @@ public sealed class DeploymentValidationService : IDeploymentValidationService
 
     public async Task<DeploymentValidationResponse> ValidateAsync(Deployment deployment, CancellationToken ct = default)
     {
-        var essence = await _db.Essences
+        // The same refusals run creation makes, in the same order.
+        if (!deployment.IsEnabled)
+            return Invalid(deployment, ["Deployment is disabled."]);
+
+        // Reads only the essence JSON. The tenant query filter applies, so another tenant's essence is "not found".
+        var essenceJson = await _db.Essences
             .AsNoTracking()
-            .FirstOrDefaultAsync(e => e.Id == deployment.EssenceId, ct);
+            .Where(e => e.Id == deployment.EssenceId)
+            .Select(e => e.EssenceJson)
+            .FirstOrDefaultAsync(ct);
 
-        if (essence is null)
-            return Invalid(deployment, "Essence not found.");
+        if (essenceJson is null)
+            return Invalid(deployment, ["Essence not found."]);
 
-        var check = _essenceValidator.CheckRunnable(essence.EssenceJson);
-        if (check.Error is not null)
-            return Invalid(deployment, check.Error);
+        // Only the verdict is used here, so the canonical rewrite is skipped.
+        var check = _essenceValidator.Validate(essenceJson, cloud: null, canonicalize: false);
+        if (!check.IsValid)
+            return Invalid(deployment, check.Errors);
 
         _logger.LogInformation(
             "Deployment {DeploymentId} validated: essence {EssenceId} is runnable",
-            deployment.Id, essence.Id);
+            deployment.Id, deployment.EssenceId);
         return new DeploymentValidationResponse(true, "Deployment structure is valid.", []);
     }
 
-    private DeploymentValidationResponse Invalid(Deployment deployment, string reason)
+    private DeploymentValidationResponse Invalid(Deployment deployment, IReadOnlyList<string> errors)
     {
         _logger.LogWarning(
-            "Deployment {DeploymentId} failed validation: essence {EssenceId}, reason={Reason}",
-            deployment.Id, deployment.EssenceId, reason);
-        return new DeploymentValidationResponse(false, "Deployment failed validation.", [reason]);
+            "Deployment {DeploymentId} failed validation: essence {EssenceId}, reasons={Reasons}",
+            deployment.Id, deployment.EssenceId, string.Join(" | ", errors));
+        return new DeploymentValidationResponse(false, "Deployment failed validation.", errors);
     }
 }

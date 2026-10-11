@@ -3,10 +3,16 @@ using Aura.Core.Enums;
 namespace Aura.Api.Services;
 
 /// <summary>
-/// The outcome of checking essence JSON: the JSON to store (operation-type names in canonical casing)
-/// and, when the essence is rejected, a short reason that is safe to show the user or feed back to a model.
+/// The outcome of checking essence JSON: the JSON to store (operation-type names in canonical casing) and every
+/// reason the essence is rejected. The reasons are safe to show the user or feed back to a model.
 /// </summary>
-public sealed record EssenceCheck(string EssenceJson, string? Error);
+public sealed record EssenceCheck(string EssenceJson, IReadOnlyList<string> Errors)
+{
+    public bool IsValid => Errors.Count == 0;
+
+    /// <summary>All reasons on one line, for callers that show a single message. Null when valid.</summary>
+    public string? Error => Errors.Count == 0 ? null : string.Join(" ", Errors);
+}
 
 /// <summary>
 /// Checks essence JSON against what the platform can run. Only operation and emissionload layers are
@@ -15,22 +21,19 @@ public sealed record EssenceCheck(string EssenceJson, string? Error);
 public interface IEssenceValidator
 {
     /// <summary>
-    /// Generation: JSON shape, the deployment parser, and the operation types valid for <paramref name="cloud"/>.
-    /// A rejection names the layer and type and lists only that cloud's types, so a retry stays on that cloud.
+    /// The deployment parser run creation uses, then the operation types. With <paramref name="cloud"/> set,
+    /// types must be valid for that cloud (generation), so a retry stays on that cloud. With null, types must be
+    /// known on any cloud (deployment validation). Layers that run creation skips (disabled) are not checked.
+    /// Pass <paramref name="canonicalize"/> false when the stored JSON is not needed, which skips the rewrite.
+    /// Every problem is returned, not just the first.
     /// </summary>
-    EssenceCheck Validate(string essenceJson, CloudProvider cloud);
+    EssenceCheck Validate(string essenceJson, CloudProvider? cloud, bool canonicalize = true);
 
     /// <summary>
-    /// Save, update and clone: every layer's operation type must be a known one, on any cloud. Essences may
-    /// mix clouds, because the Worker gives each layer its own cloud account and does not check that an
-    /// operation matches it. Input that is not a JSON object with a layers object passes; structure is not checked here.
+    /// Save, update and clone: every layer's operation type must be a known one, on any cloud, disabled layers
+    /// included. Essences may mix clouds, because the Worker gives each layer its own cloud account and does not
+    /// check that an operation matches it. Input that is not a JSON object with a layers object passes; structure
+    /// is not checked here.
     /// </summary>
     EssenceCheck CheckOperationTypes(string essenceJson);
-
-    /// <summary>
-    /// Deployment validation: the same parser run creation uses, then the operation-type checks save applies
-    /// on any cloud. A rejection is what run creation or the save path would fail on, so a deployment that
-    /// passes here is one whose essence is accepted by both.
-    /// </summary>
-    EssenceCheck CheckRunnable(string essenceJson);
 }

@@ -1,17 +1,16 @@
 using Aura.Api.Services;
+using Aura.Core.Enums;
 using Aura.Core.Entities;
-using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace Aura.Tests;
 
 public class DeploymentValidationServiceTests
 {
-    private sealed record FakeTenant(Guid TenantId) : ITenantContext;
-
     private const string Runnable =
         """
         {
@@ -142,5 +141,36 @@ public class DeploymentValidationServiceTests
 
         Assert.False(result.IsValid);
         Assert.Equal(new[] { "Essence not found." }, result.Errors);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_refuses_a_disabled_deployment_before_checking_its_essence()
+    {
+        var tenantId = Guid.NewGuid();
+        using var db = CreateDb(Guid.NewGuid().ToString(), tenantId);
+        var deployment = await SeedDeployment(db, tenantId, Runnable);
+        deployment.IsEnabled = false;
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db).ValidateAsync(deployment);
+
+        Assert.False(result.IsValid);
+        Assert.Equal(new[] { "Deployment is disabled." }, result.Errors);
+    }
+
+    [Fact]
+    public async Task ValidateAsync_lets_an_unexpected_validator_exception_propagate_instead_of_reporting_invalid()
+    {
+        // A parser bug is not a verdict on the essence. It must reach the 500 handler, not a 200 "invalid".
+        var tenantId = Guid.NewGuid();
+        using var db = CreateDb(Guid.NewGuid().ToString(), tenantId);
+        var deployment = await SeedDeployment(db, tenantId, Runnable);
+        var validator = new Mock<IEssenceValidator>();
+        validator
+            .Setup(v => v.Validate(It.IsAny<string>(), It.IsAny<CloudProvider?>(), It.IsAny<bool>()))
+            .Throws(new NullReferenceException("parser bug"));
+        var service = new DeploymentValidationService(db, validator.Object, NullLogger<DeploymentValidationService>.Instance);
+
+        await Assert.ThrowsAsync<NullReferenceException>(() => service.ValidateAsync(deployment));
     }
 }
