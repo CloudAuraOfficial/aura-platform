@@ -23,17 +23,20 @@ public interface IEssenceValidator
     /// <summary>
     /// The deployment parser run creation uses, then the operation types. With <paramref name="cloud"/> set,
     /// types must be valid for that cloud (generation), so a retry stays on that cloud. With null, types must be
-    /// known on any cloud (deployment validation). Layers that run creation skips (disabled) are not checked.
+    /// known on any cloud (deployment validation). Disabled layers are skipped for operation types; their
+    /// isEnabled must still be a boolean. An essence with no enabled layers is rejected here.
     /// Pass <paramref name="canonicalize"/> false when the stored JSON is not needed, which skips the rewrite.
     /// Every problem is returned, not just the first.
     /// </summary>
     EssenceCheck Validate(string essenceJson, CloudProvider? cloud, bool canonicalize = true);
 
     /// <summary>
-    /// Save, update and clone: every layer's operation type must be a known one, on any cloud, disabled layers
-    /// included. Essences may mix clouds, because the Worker gives each layer its own cloud account and does not
-    /// check that an operation matches it. Input that is not a JSON object with a layers object passes; structure
-    /// is not checked here.
+    /// Save, update and clone: the same checks as <see cref="Validate"/> with no cloud, except that an essence with
+    /// no enabled layers is accepted, so a paused essence can be saved. Duplicate layer names, structure and the run
+    /// creation parser run first (so a cycle or a bad runPolicy is rejected at save, not at run creation). Then the
+    /// operation type of every operation or emissionload layer, enabled or disabled, must be a known one on any cloud.
+    /// Of a disabled layer only isEnabled and operationType are checked. Essences may mix clouds, because the Worker gives each layer
+    /// its own cloud account. Canonical casing is stored when the essence is otherwise valid.
     /// </summary>
-    EssenceCheck CheckOperationTypes(string essenceJson);
+    EssenceCheck CheckForSave(string essenceJson);
 }

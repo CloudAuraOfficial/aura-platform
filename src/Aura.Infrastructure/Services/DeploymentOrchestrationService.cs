@@ -186,7 +186,15 @@ public class DeploymentOrchestrationService : IDeploymentOrchestrationService
             definitions[name] = new LayerDefinition(name, executorType, parameters, scriptPath, dependsOn, operationType, cloudAccountId, runPolicy);
         }
 
-        // Remove dependencies on disabled/missing layers
+        // A name that matches no layer at all is a typo, and is rejected. A name that matches a disabled layer is
+        // dropped below, so disabling a step needs no edit to its dependents.
+        var allLayerNames = layersElement.EnumerateObject().Select(p => p.Name).ToHashSet();
+        foreach (var def in definitions.Values)
+            foreach (var dep in def.DependsOn)
+                if (!allLayerNames.Contains(dep))
+                    throw new InvalidEssenceException($"Layer '{def.Name}' depends on '{dep}', which does not exist.");
+
+        // Remove dependencies on disabled layers
         var validNames = definitions.Keys.ToHashSet();
         foreach (var def in definitions.Values)
             def.DependsOn.RemoveAll(d => !validNames.Contains(d));
