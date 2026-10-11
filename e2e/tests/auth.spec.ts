@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 const API = '/api/v1/auth';
-const EMAIL = process.env.TEST_EMAIL || 'org@cloudaura.cloud';
-const PASSWORD = process.env.TEST_PASSWORD || 'admin12345@$!';
+const EMAIL = process.env.TEST_EMAIL!;
+const PASSWORD = process.env.TEST_PASSWORD!;
 
 test.describe('Authentication API', () => {
   test('POST /auth/login with invalid credentials returns 401', async ({ request }) => {
