@@ -1,5 +1,5 @@
+using Aura.Core.Entities;
 using Aura.Core.Exceptions;
-using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -9,13 +9,13 @@ namespace Aura.Infrastructure.Services;
 public class UserAiKeyService
 {
     private readonly AuraDbContext _db;
-    private readonly ICryptoService _crypto;
+    private readonly StoredSecretService _secrets;
     private readonly ILogger<UserAiKeyService> _logger;
 
-    public UserAiKeyService(AuraDbContext db, ICryptoService crypto, ILogger<UserAiKeyService> logger)
+    public UserAiKeyService(AuraDbContext db, StoredSecretService secrets, ILogger<UserAiKeyService> logger)
     {
         _db = db;
-        _crypto = crypto;
+        _secrets = secrets;
         _logger = logger;
     }
 
@@ -34,7 +34,9 @@ public class UserAiKeyService
 
         try
         {
-            return _crypto.Decrypt(provider.EncryptedApiKey);
+            // Decrypts, and re-encrypts a legacy row to v2 when the upgrade gate is open (StoredSecretService).
+            return await _secrets.ReadAsync<UserAiProvider>(
+                provider.Id, nameof(UserAiProvider.EncryptedApiKey), provider.EncryptedApiKey, ct);
         }
         catch (StoredSecretUnreadableException ex)
         {

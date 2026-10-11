@@ -4,9 +4,11 @@ using Aura.Core.Entities;
 using Aura.Core.Exceptions;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
+using Aura.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Aura.Api.Controllers;
 
@@ -18,18 +20,24 @@ public class CloudAccountsController : ControllerBase
     private readonly AuraDbContext _db;
     private readonly ITenantContext _tenant;
     private readonly ICryptoService _crypto;
+    private readonly StoredSecretService _storedSecrets;
     private readonly ICloudCredentialTester _tester;
+    private readonly ILogger<CloudAccountsController> _logger;
 
     public CloudAccountsController(
         AuraDbContext db,
         ITenantContext tenant,
         ICryptoService crypto,
-        ICloudCredentialTester tester)
+        StoredSecretService storedSecrets,
+        ICloudCredentialTester tester,
+        ILogger<CloudAccountsController> logger)
     {
         _db = db;
         _tenant = tenant;
         _crypto = crypto;
+        _storedSecrets = storedSecrets;
         _tester = tester;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -95,7 +103,7 @@ public class CloudAccountsController : ControllerBase
         if (account is null)
             return NotFound(new ErrorResponse("not_found", "Cloud account not found.", 404));
 
-        var credsJson = DecryptCredentials(account);
+        var credsJson = await ReadCredentialsAsync(account, ct);
         var result = await _tester.TestAsync(account.Provider, credsJson, ct);
         return Ok(result);
     }
@@ -113,11 +121,13 @@ public class CloudAccountsController : ControllerBase
     }
 
     // Names the account so the middleware can return an actionable 422. The middleware maps the exception.
-    private string DecryptCredentials(CloudAccount account)
+    // Decrypt and the gated legacy upgrade live in StoredSecretService.
+    private async Task<string> ReadCredentialsAsync(CloudAccount account, CancellationToken ct)
     {
         try
         {
-            return _crypto.Decrypt(account.EncryptedCredentials);
+            return await _storedSecrets.ReadAsync<CloudAccount>(
+                account.Id, nameof(CloudAccount.EncryptedCredentials), account.EncryptedCredentials, ct);
         }
         catch (StoredSecretUnreadableException ex)
         {

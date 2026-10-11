@@ -118,7 +118,18 @@ builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Inf
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimator, Aura.Infrastructure.Services.GcpCostEstimator>();
 builder.Services.AddSingleton<Aura.Core.Interfaces.ICloudCostEstimatorFactory, Aura.Infrastructure.Services.CloudCostEstimatorFactory>();
 builder.Services.AddScoped<IExperimentService, ExperimentService>();
+// Rollout gate (#45). Off by default. The operator sets it only after API and Worker both run code that reads v2.
+// It enables the lazy upgrade on owner reads and the one-off migration at startup. Unset it once the migration log is clean.
+var migrateSecretsToV2 = string.Equals(
+    Environment.GetEnvironmentVariable("MIGRATE_SECRETS_TO_V2"), "true", StringComparison.OrdinalIgnoreCase);
+builder.Services.AddSingleton(new StoredSecretOptions { UpgradeLegacyOnRead = migrateSecretsToV2 });
+builder.Services.AddScoped<StoredSecretService>();
+builder.Services.AddScoped<ISecretMigrationLock, PostgresSecretMigrationLock>();
 builder.Services.AddScoped<UserAiKeyService>();
+builder.Services.AddScoped<SecretMigrationService>();
+
+if (migrateSecretsToV2)
+    builder.Services.AddHostedService<SecretMigrationHostedService>();
 
 // LLM providers for AI essence generation. OpenAI-compatible providers are
 // registrations of one parameterized class; adding another gateway is one line.

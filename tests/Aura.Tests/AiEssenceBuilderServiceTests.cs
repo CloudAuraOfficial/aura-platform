@@ -11,6 +11,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+using static Aura.Tests.SecretTestFixtures;
 
 namespace Aura.Tests;
 
@@ -66,7 +67,7 @@ public class AiEssenceBuilderServiceTests
 
         var crypto = new Mock<ICryptoService>();
         crypto.Setup(c => c.Decrypt(It.IsAny<string>())).Returns<string>(s => s);
-        var keySvc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
+        var keySvc = new UserAiKeyService(db, StoredSecrets(db, crypto.Object), Mock.Of<ILogger<UserAiKeyService>>());
         var svc = new AiEssenceBuilderService(
             new StubFactory(new TokenBurningProvider()), keySvc, db,
             new EssenceValidator(),
@@ -117,7 +118,7 @@ public class AiEssenceBuilderServiceTests
         var crypto = new Mock<ICryptoService>();
         crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
             .Throws(StoredSecretUnreadableException.FromCryptoFailure(new CryptographicException()));
-        var keySvc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
+        var keySvc = new UserAiKeyService(db, StoredSecrets(db, crypto.Object), Mock.Of<ILogger<UserAiKeyService>>());
         var provider = new TokenBurningProvider();
         var svc = new AiEssenceBuilderService(
             new StubFactory(provider), keySvc, db, new EssenceValidator(), Mock.Of<ILogger<AiEssenceBuilderService>>());

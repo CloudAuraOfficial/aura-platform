@@ -20,6 +20,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
+using static Aura.Tests.SecretTestFixtures;
 
 namespace Aura.Tests;
 
@@ -149,7 +150,7 @@ public class EssenceGenerationE2ETests
         var logger = new CapturingLogger<AiEssenceBuilderService>();
         var service = new AiEssenceBuilderService(
             new LlmProviderFactory(new ILlmProvider[] { provider }),
-            new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>()),
+            new UserAiKeyService(db, StoredSecrets(db, crypto.Object), Mock.Of<ILogger<UserAiKeyService>>()),
             db,
             new EssenceValidator(),
             logger);
