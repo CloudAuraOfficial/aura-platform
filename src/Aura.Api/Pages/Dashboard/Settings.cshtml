@@ -61,41 +61,40 @@ if (!token) window.location.href = '/dashboard/login';
 
 let supportedProviders = [];
 
-async function api(path, opts = {}) {
-    const res = await fetch(path, {
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        ...opts
-    });
-    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
-    if (res.status === 204) return {};
-    return await res.json();
-}
+const api = auraApi;
 
-function toast(msg, type = 'success') {
-    var el = document.createElement('div');
-    el.className = 'toast toast-' + type;
-    el.textContent = msg;
-    document.body.appendChild(el);
-    setTimeout(function() { el.remove(); }, 3000);
-}
+function toast(msg, type = 'success') { auraToast(msg, type); }
 
 async function loadSupportedProviders() {
-    supportedProviders = await api('/api/v1/account/supported-providers') || [];
+    var data = await api('/api/v1/account/supported-providers');
+    supportedProviders = Array.isArray(data) ? data : [];
+}
+
+function supportedLabel(name) {
+    var match = supportedProviders.find(function(p) { return p.name === name; });
+    return match ? match.label : humanize(name);
 }
 
 async function loadProviders() {
+    var list = document.getElementById('providerList');
     var data = await api('/api/v1/account/ai-providers');
-    if (!data || data.length === 0) {
-        document.getElementById('providerList').innerHTML = '<div class="empty">No AI providers configured yet.</div>';
+    if (!data) return;
+    if (data.error) {
+        list.innerHTML = errorState(data.message);
+        return;
+    }
+    if (data.length === 0) {
+        list.innerHTML = emptyState(
+            'Add an AI provider key to turn on AI essence generation. Keys are encrypted and never shown again.');
         return;
     }
 
     var html = data.map(function(p) {
         return '<div class="provider-row">' +
             '<div class="provider-info">' +
-                '<span class="provider-name">' + esc(p.providerName) + '</span>' +
+                '<span class="provider-name">' + esc(supportedLabel(p.providerName)) + '</span>' +
                 (p.displayLabel ? '<span class="provider-label">' + esc(p.displayLabel) + '</span>' : '') +
-                '<span class="provider-key">' + (p.hasKey ? 'Key configured' : 'No key') + '</span>' +
+                '<span class="provider-key">' + (p.hasKey ? 'Key saved' : 'No key saved') + '</span>' +
             '</div>' +
             '<div class="provider-actions">' +
                 '<button class="btn btn-primary btn-sm" data-action="edit" data-provider="' + esc(p.providerName) + '" data-label="' + esc(p.displayLabel || '') + '">Edit</button> ' +
@@ -104,7 +103,7 @@ async function loadProviders() {
         '</div>';
     }).join('');
 
-    document.getElementById('providerList').innerHTML = html;
+    list.innerHTML = html;
 }
 
 function openModal(editProviderName) {
@@ -114,14 +113,19 @@ function openModal(editProviderName) {
     document.getElementById('editProvider').value = editProviderName || '';
     document.getElementById('fApiKey').value = '';
     document.getElementById('fLabel').value = '';
-    document.getElementById('modalError').style.display = 'none';
+    var errEl = document.getElementById('modalError');
+    errEl.style.display = 'none';
 
     // Build provider dropdown
     var sel = document.getElementById('fProvider');
     if (isEdit) {
-        sel.innerHTML = '<option value="' + esc(editProviderName) + '">' + esc(editProviderName) + '</option>';
+        sel.innerHTML = '<option value="' + esc(editProviderName) + '">' + esc(supportedLabel(editProviderName)) + '</option>';
         sel.disabled = true;
     } else {
+        if (supportedProviders.length === 0) {
+            errEl.textContent = 'Could not load the list of AI providers. Close this and try again.';
+            errEl.style.display = 'block';
+        }
         sel.innerHTML = supportedProviders.map(function(p) {
             return '<option value="' + esc(p.name) + '">' + esc(p.label) + '</option>';
         }).join('');
@@ -177,7 +181,8 @@ document.getElementById('providerList').addEventListener('click', function(ev) {
     } else if (action === 'delete') {
         if (!confirm('Remove ' + provider + ' API key?')) return;
         (async function() {
-            await api('/api/v1/account/ai-providers/' + encodeURIComponent(provider), { method: 'DELETE' });
+            var res = await api('/api/v1/account/ai-providers/' + encodeURIComponent(provider), { method: 'DELETE' });
+            if (res && res.error) { toast(res.message, 'error'); return; }
             toast('Provider removed');
             loadProviders();
         })();

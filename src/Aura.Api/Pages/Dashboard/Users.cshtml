@@ -7,8 +7,8 @@
 <div class="toolbar">
     <h1>Users</h1>
     <div class="actions">
-        <button class="btn btn-secondary" onclick="openInvite()">Invite</button>
-        <button class="btn btn-primary" onclick="openCreate()">+ Create User</button>
+        <button class="btn btn-secondary" onclick="openInvite()">Invite User</button>
+        <button class="btn btn-primary" onclick="openCreate()">+ New User</button>
     </div>
 </div>
 <div id="content"><div class="empty">Loading...</div></div>
@@ -81,24 +81,12 @@
 const token = localStorage.getItem('aura_token');
 if (!token) window.location.href = '/dashboard/login';
 
-async function api(path, opts = {}) {
-    const res = await fetch(path, {
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        ...opts
-    });
-    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
-    if (res.status === 403) return { error: 'forbidden', message: 'Admin access required' };
-    if (res.status === 204) return {};
-    return await res.json();
-}
+const api = auraApi;
 
-function toast(msg, type = 'success') {
-    const el = document.createElement('div');
-    el.className = `toast toast-${type}`;
-    el.textContent = msg;
-    document.body.appendChild(el);
-    setTimeout(() => el.remove(), 3000);
-}
+function toast(msg, type = 'success') { auraToast(msg, type); }
+
+// Users by id, filled on each list load. Rows read from here instead of inlining JSON into onclick.
+let usersById = {};
 
 function closeModal() { document.getElementById('modal').classList.remove('open'); }
 
@@ -115,6 +103,8 @@ function openCreate() {
     document.getElementById('modalError').style.display = 'none';
     document.getElementById('modal').classList.add('open');
 }
+
+function openEditById(id) { const u = usersById[id]; if (u) openEdit(u); }
 
 function openEdit(u) {
     document.getElementById('modalTitle').textContent = 'Edit User';
@@ -163,7 +153,9 @@ async function saveUser(e) {
 
 async function deleteUser(id, email) {
     if (!confirm(`Delete user "${email}"?`)) return;
-    await api(`/api/v1/users/${id}`, { method: 'DELETE' });
+    const res = await api(`/api/v1/users/${id}`, { method: 'DELETE' });
+    if (!res) return;
+    if (res.error) { toast(res.message, 'error'); return; }
     toast('User deleted');
     loadUsers();
 }
@@ -202,28 +194,41 @@ async function sendInvite(e) {
 }
 
 async function loadUsers() {
+    const content = document.getElementById('content');
     const data = await api('/api/v1/users?limit=100');
-    if (data?.error === 'forbidden') {
-        document.getElementById('content').innerHTML = '<div class="alert alert-error">Admin access required</div>';
+    if (!data) return;
+    if (data.error === 'forbidden') {
+        content.innerHTML = errorState('Only admins can manage users.');
         return;
     }
-    if (!data || data.items.length === 0) {
-        document.getElementById('content').innerHTML = '<div class="empty">No users</div>';
+    if (data.error) {
+        content.innerHTML = errorState(data.message);
         return;
     }
-    document.getElementById('content').innerHTML = `<table><thead><tr>
+    const items = data.items || [];
+    usersById = Object.fromEntries(items.map(u => [u.id, u]));
+    if (items.length === 0) {
+        content.innerHTML = emptyState(
+            'Users sign in to the dashboard and get a role that decides what they can change.',
+            '<button class="btn btn-secondary" onclick="openInvite()">Invite User</button> ' +
+            '<button class="btn btn-primary" onclick="openCreate()">+ New User</button>');
+        return;
+    }
+    content.innerHTML = `<table><thead><tr>
         <th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th>
-    </tr></thead><tbody>${data.items.map(u => `<tr>
-        <td>${u.email}</td>
-        <td><span class="badge badge-info">${u.role}</span></td>
-        <td>${u.isDisabled ? '<span class="badge badge-danger">disabled</span>' : '<span class="badge badge-success">active</span>'}</td>
+    </tr></thead><tbody>${items.map(u => `<tr>
+        <td>${esc(u.email)}</td>
+        <td><span class="badge badge-info">${esc(u.role)}</span></td>
+        <td>${u.isDisabled ? '<span class="badge badge-danger">Disabled</span>' : '<span class="badge badge-success">Active</span>'}</td>
         <td>${new Date(u.createdAt).toLocaleDateString()}</td>
         <td class="actions">
-            <button class="btn btn-secondary btn-sm" onclick='openEdit(${JSON.stringify(u)})'>Edit</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteUser('${u.id}','${u.email.replace(/'/g,"\\'")}')">Delete</button>
+            <button class="btn btn-secondary btn-sm" onclick="openEditById('${u.id}')">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteUserById('${u.id}')">Delete</button>
         </td>
     </tr>`).join('')}</tbody></table>`;
 }
+
+function deleteUserById(id) { const u = usersById[id]; if (u) deleteUser(u.id, u.email); }
 
 loadUsers();
 </script>

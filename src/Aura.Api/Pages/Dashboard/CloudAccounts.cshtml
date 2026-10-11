@@ -45,24 +45,12 @@
 const token = localStorage.getItem('aura_token');
 if (!token) window.location.href = '/dashboard/login';
 
-async function api(path, opts = {}) {
-    const res = await fetch(path, {
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        ...opts
-    });
-    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
-    if (res.status === 403) return { error: 'forbidden', message: 'Access denied' };
-    if (res.status === 204) return {};
-    return await res.json();
-}
+const api = auraApi;
 
-function toast(msg, type = 'success') {
-    const el = document.createElement('div');
-    el.className = `toast toast-${type}`;
-    el.textContent = msg;
-    document.body.appendChild(el);
-    setTimeout(() => el.remove(), 3000);
-}
+function toast(msg, type = 'success') { auraToast(msg, type); }
+
+// Accounts by id, filled on each list load. Rows read from here instead of inlining JSON into onclick.
+let accountsById = {};
 
 function closeModal() { document.getElementById('modal').classList.remove('open'); }
 
@@ -79,6 +67,8 @@ function openCreate() {
     document.getElementById('modalError').style.display = 'none';
     document.getElementById('modal').classList.add('open');
 }
+
+function openEditById(id) { const a = accountsById[id]; if (a) openEdit(a); }
 
 function openEdit(a) {
     document.getElementById('modalTitle').textContent = 'Edit Cloud Account';
@@ -122,7 +112,9 @@ async function saveAccount(e) {
 
 async function deleteAccount(id, label) {
     if (!confirm(`Delete cloud account "${label}"? Essences linked to this account will be affected.`)) return;
-    await api(`/api/v1/cloud-accounts/${id}`, { method: 'DELETE' });
+    const res = await api(`/api/v1/cloud-accounts/${id}`, { method: 'DELETE' });
+    if (!res) return;
+    if (res.error) { toast(res.message, 'error'); return; }
     toast('Account deleted');
     loadAccounts();
 }
@@ -146,32 +138,44 @@ async function testAccount(id, btn) {
 
 function providerBadge(p) {
     const colors = { Azure: 'info', Aws: 'warning', Gcp: 'success' };
-    return `<span class="badge badge-${colors[p] || 'muted'}">${p}</span>`;
+    return `<span class="badge badge-${colors[p] || 'muted'}">${esc(providerLabel(p))}</span>`;
 }
 
 async function loadAccounts() {
+    const content = document.getElementById('content');
     const data = await api('/api/v1/cloud-accounts?limit=100');
-    if (data?.error === 'forbidden') {
-        document.getElementById('content').innerHTML = '<div class="alert alert-error">Access denied</div>';
+    if (!data) return;
+    if (data.error === 'forbidden') {
+        content.innerHTML = errorState('You do not have access to cloud accounts.');
         return;
     }
-    if (!data || data.items.length === 0) {
-        document.getElementById('content').innerHTML = '<div class="empty">No cloud accounts yet. Add your first one!</div>';
+    if (data.error) {
+        content.innerHTML = errorState(data.message);
         return;
     }
-    document.getElementById('content').innerHTML = `<table><thead><tr>
+    const items = data.items || [];
+    accountsById = Object.fromEntries(items.map(a => [a.id, a]));
+    if (items.length === 0) {
+        content.innerHTML = emptyState(
+            'A cloud account holds the credentials Aura uses to deploy to Azure, AWS or GCP. Essences deploy through one.',
+            '<button class="btn btn-primary" onclick="openCreate()">+ New Account</button>');
+        return;
+    }
+    content.innerHTML = `<table><thead><tr>
         <th>Label</th><th>Provider</th><th>Created</th><th>Actions</th>
-    </tr></thead><tbody>${data.items.map(a => `<tr>
-        <td>${a.label}</td>
+    </tr></thead><tbody>${items.map(a => `<tr>
+        <td>${esc(a.label)}</td>
         <td>${providerBadge(a.provider)}</td>
         <td>${new Date(a.createdAt).toLocaleDateString()}</td>
         <td class="actions">
             <button class="btn btn-secondary btn-sm" onclick="testAccount('${a.id}', this)">Test</button>
-            <button class="btn btn-secondary btn-sm" onclick='openEdit(${JSON.stringify(a)})'>Edit</button>
-            <button class="btn btn-danger btn-sm" onclick="deleteAccount('${a.id}','${a.label.replace(/'/g,"\\'")}')">Delete</button>
+            <button class="btn btn-secondary btn-sm" onclick="openEditById('${a.id}')">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteAccountById('${a.id}')">Delete</button>
         </td>
     </tr>`).join('')}</tbody></table>`;
 }
+
+function deleteAccountById(id) { const a = accountsById[id]; if (a) deleteAccount(a.id, a.label); }
 
 loadAccounts();
 </script>

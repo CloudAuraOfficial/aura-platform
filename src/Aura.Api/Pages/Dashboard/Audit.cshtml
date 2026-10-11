@@ -5,37 +5,55 @@
 }
 
 <h1>Audit Log</h1>
+<p style="color:var(--muted);font-size:0.85rem;margin-bottom:1rem">Who changed what, and when. Newest first.</p>
 <div id="content"><div class="empty">Loading...</div></div>
 
 <script>
 const token = localStorage.getItem('aura_token');
 if (!token) window.location.href = '/dashboard/login';
 
-async function api(path) {
-    const res = await fetch(path, { headers: { 'Authorization': 'Bearer ' + token } });
-    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
-    if (res.status === 403) return { items: [], total: 0, error: 'forbidden' };
-    return await res.json();
+const api = auraApi;
+
+// The log only carries user ids; the users list maps them to emails. Missing mapping falls back to "Another user".
+async function loadUserEmails() {
+    const data = await api('/api/v1/users?limit=100');
+    const map = {};
+    if (data && !data.error) (data.items || []).forEach(u => { map[u.id] = u.email; });
+    return map;
+}
+
+// Entity types and actions are stored as code names ("DeploymentRun", "accept-invite").
+// Shown as words, with the full entity id kept in the tooltip.
+function entityLabel(e) {
+    return humanize(e.entityType);
 }
 
 (async () => {
+    const content = document.getElementById('content');
     const data = await api('/api/v1/audit-log?limit=50');
-    if (data?.error === 'forbidden') {
-        document.getElementById('content').innerHTML = '<div class="alert alert-error">Admin access required</div>';
+    if (!data) return;
+    if (data.error === 'forbidden') {
+        content.innerHTML = errorState('Only admins can view the audit log.');
         return;
     }
-    if (!data || data.items.length === 0) {
-        document.getElementById('content').innerHTML = '<div class="empty">No audit entries</div>';
+    if (data.error) {
+        content.innerHTML = errorState(data.message);
         return;
     }
-    document.getElementById('content').innerHTML = `<table><thead><tr>
-        <th>Time</th><th>Action</th><th>Entity</th><th>Detail</th><th>User ID</th>
-    </tr></thead><tbody>${data.items.map(e => `<tr>
-        <td>${new Date(e.createdAt).toLocaleString()}</td>
-        <td><span class="badge badge-info">${e.action}</span></td>
-        <td>${e.entityType}${e.entityId ? ' / ' + e.entityId.substring(0,8) : ''}</td>
-        <td>${e.detail || '-'}</td>
-        <td>${e.userId.substring(0,8)}</td>
+    const items = data.items || [];
+    if (items.length === 0) {
+        content.innerHTML = emptyState('Nothing has been recorded yet. Changes to essences, deployments, runs and accounts show up here as they happen.');
+        return;
+    }
+    const emails = await loadUserEmails();
+    content.innerHTML = `<table><thead><tr>
+        <th>Time</th><th>Action</th><th>Entity</th><th>Detail</th><th>User</th>
+    </tr></thead><tbody>${items.map(e => `<tr>
+        <td>${esc(new Date(e.createdAt).toLocaleString())}</td>
+        <td><span class="badge badge-info">${esc(humanize(e.action))}</span></td>
+        <td title="${esc(e.entityId || '')}">${esc(entityLabel(e))}</td>
+        <td>${esc(e.detail) || '-'}</td>
+        <td>${esc(emails[e.userId] || (/^0{8}-0{4}-0{4}-0{4}-0{12}$/.test(e.userId) ? 'System' : 'Another user'))}</td>
     </tr>`).join('')}</tbody></table>`;
 })();
 </script>

@@ -196,23 +196,9 @@ if (!token) window.location.href = '/dashboard/login';
 let accounts = [];
 let layerCounter = 0;
 
-async function api(path, opts = {}) {
-    const res = await fetch(path, {
-        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-        ...opts
-    });
-    if (res.status === 401) { window.location.href = '/dashboard/login'; return null; }
-    if (res.status === 204) return {};
-    return await res.json();
-}
+const api = auraApi;
 
-function toast(msg, type = 'success') {
-    var el = document.createElement('div');
-    el.className = 'toast toast-' + type;
-    el.textContent = msg;
-    document.body.appendChild(el);
-    setTimeout(function() { el.remove(); }, 3000);
-}
+function toast(msg, type = 'success') { auraToast(msg, type); }
 
 // === Tab switching ===
 document.querySelector('.tabs').addEventListener('click', function(ev) {
@@ -489,15 +475,52 @@ function openEdit(e) {
     document.getElementById('modal').classList.add('open');
 }
 
-async function loadAccountsDropdown(selected) {
+// Returns false when the accounts could not be loaded.
+async function ensureAccounts() {
     if (accounts.length === 0) {
         var data = await api('/api/v1/cloud-accounts?limit=100');
-        if (data && data.items) accounts = data.items;
+        if (!data || data.error) return false;
+        accounts = data.items || [];
     }
+    return true;
+}
+
+// Declared provider wins; otherwise derive it from the accounts the layers (and the essence) point at.
+function essenceProvider(e, ej) {
+    if (ej.baseEssence && ej.baseEssence.cloudProvider) return providerLabel(ej.baseEssence.cloudProvider);
+    var ids = Object.values(ej.layers || {}).map(function(l) { return l && l.cloudAccountId; }).filter(Boolean);
+    if (ids.length === 0 && e.cloudAccountId) ids = [e.cloudAccountId];
+    var providers = {};
+    ids.forEach(function(id) { var a = accounts.find(function(x) { return x.id === id; }); if (a) providers[providerLabel(a.provider)] = 1; });
+    var names = Object.keys(providers);
+    return names.length > 1 ? 'Multi-cloud' : (names[0] || '-');
+}
+
+function accountLabel(id) {
+    var a = accounts.find(function(x) { return x.id === id; });
+    return a ? a.label + ' (' + providerLabel(a.provider) + ')' : 'Unknown account';
+}
+
+async function loadAccountsDropdown(selected) {
+    var loaded = await ensureAccounts();
+    var errEl = document.getElementById('modalError');
+    var saveBtn = document.getElementById('saveBtn');
     var sel = document.getElementById('fAccount');
     sel.innerHTML = accounts.map(function(a) {
-        return '<option value="' + a.id + '"' + (a.id === selected ? ' selected' : '') + '>' + esc(a.label) + ' (' + esc(a.provider) + ')</option>';
+        return '<option value="' + esc(a.id) + '"' + (a.id === selected ? ' selected' : '') + '>' + esc(a.label) + ' (' + esc(providerLabel(a.provider)) + ')</option>';
     }).join('');
+    // An essence belongs to a cloud account, so creating one without an account can't work.
+    if (!loaded) {
+        errEl.textContent = 'Could not load your cloud accounts. Close this and try again.';
+        errEl.style.display = 'block';
+        saveBtn.disabled = true;
+    } else if (accounts.length === 0) {
+        errEl.innerHTML = 'An essence needs a cloud account. <a href="/dashboard/cloud-accounts">Add a cloud account</a> first.';
+        errEl.style.display = 'block';
+        saveBtn.disabled = true;
+    } else {
+        saveBtn.disabled = false;
+    }
 }
 
 // === Save ===
@@ -569,46 +592,65 @@ document.getElementById('cloneForm').addEventListener('submit', function(ev) {
 // === Delete ===
 async function deleteEssence(id, name) {
     if (!confirm('Delete essence "' + name + '"?')) return;
-    await api('/api/v1/essences/' + id, { method: 'DELETE' });
+    var res = await api('/api/v1/essences/' + id, { method: 'DELETE' });
+    if (!res) return;
+    if (res.error) { toast(res.message, 'error'); return; }
     toast('Essence deleted');
     loadEssences();
 }
 
 // === List ===
+// Essences by id: rows point at the cache instead of carrying JSON in attributes (btoa breaks on non-Latin names).
+var essencesById = {};
+
 async function loadEssences() {
+    var content = document.getElementById('content');
     var data = await api('/api/v1/essences?limit=100');
-    if (!data || data.items.length === 0) {
-        document.getElementById('content').innerHTML = '<div class="empty">No essences yet. Create your first one!</div>';
+    if (!data) return;
+    if (data.error) {
+        content.innerHTML = errorState(data.message);
         return;
     }
+    var items = data.items || [];
+    if (items.length === 0) {
+        content.innerHTML = emptyState(
+            'Essences describe what to deploy and where: a cloud account, a region and an ordered set of layers.',
+            '<button class="btn btn-secondary" onclick="document.getElementById(\'btnAiGenerate\').click()">AI Generate</button> ' +
+            '<button class="btn btn-primary" onclick="document.getElementById(\'btnNewEssence\').click()">+ New Essence</button>');
+        return;
+    }
+    // Account names are shown as labels, so make sure the list is loaded before rendering rows.
+    await ensureAccounts();
+    essencesById = {};
 
     var html = '<table><thead><tr><th>Name</th><th>Version</th><th>Provider</th><th>Layers</th><th>Cloud Account</th><th>Created</th><th>Actions</th></tr></thead><tbody>';
-    for (var i = 0; i < data.items.length; i++) {
-        var e = data.items[i];
+    for (var i = 0; i < items.length; i++) {
+        var e = items[i];
+        essencesById[e.id] = e;
         var provider = '-';
         var layerCount = 0;
         try {
             var ej = typeof e.essenceJson === 'string' ? JSON.parse(e.essenceJson) : e.essenceJson;
-            provider = (ej.baseEssence && ej.baseEssence.cloudProvider) || '-';
+            provider = essenceProvider(e, ej);
             layerCount = ej.layers ? Object.keys(ej.layers).length : 0;
         } catch(ex) {}
 
         html += '<tr>' +
             '<td><strong>' + esc(e.name) + '</strong></td>' +
-            '<td>v' + e.currentVersion + '</td>' +
+            '<td>v' + esc(e.currentVersion) + '</td>' +
             '<td><span class="badge badge-info">' + esc(provider) + '</span></td>' +
             '<td>' + layerCount + ' layer' + (layerCount !== 1 ? 's' : '') + '</td>' +
-            '<td>' + esc(e.cloudAccountId.substring(0,8)) + '...</td>' +
+            '<td>' + esc(accountLabel(e.cloudAccountId)) + '</td>' +
             '<td>' + new Date(e.createdAt).toLocaleDateString() + '</td>' +
             '<td class="actions">' +
-                '<button class="btn btn-primary btn-sm" data-action="edit" data-item="' + esc(btoa(JSON.stringify(e))) + '">Edit</button> ' +
-                '<button class="btn btn-secondary btn-sm" data-action="clone" data-id="' + e.id + '" data-name="' + esc(e.name) + '">Clone</button> ' +
-                '<button class="btn btn-danger btn-sm" data-action="delete" data-id="' + e.id + '" data-name="' + esc(e.name) + '">Delete</button>' +
+                '<button class="btn btn-primary btn-sm" data-action="edit" data-id="' + esc(e.id) + '">Edit</button> ' +
+                '<button class="btn btn-secondary btn-sm" data-action="clone" data-id="' + esc(e.id) + '">Clone</button> ' +
+                '<button class="btn btn-danger btn-sm" data-action="delete" data-id="' + esc(e.id) + '">Delete</button>' +
             '</td>' +
         '</tr>';
     }
     html += '</tbody></table>';
-    document.getElementById('content').innerHTML = html;
+    content.innerHTML = html;
 }
 
 loadEssences();
@@ -690,7 +732,7 @@ document.getElementById('aiForm').addEventListener('submit', function(ev) {
         try {
             httpRes = await fetch('/api/v1/essences/generate', {
                 method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('aura_token'), 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prompt: prompt, cloudAccountId: accountId, provider: provider })
             });
         } catch (e) {
@@ -738,7 +780,7 @@ document.getElementById('aiForm').addEventListener('submit', function(ev) {
 
         // Show stats
         var statsText = 'Tokens: ' + res.inputTokens + ' in / ' + res.outputTokens + ' out · ' +
-            res.iterations + ' iteration(s) · ' + res.durationMs + 'ms · Model: ' + esc(res.model);
+            res.iterations + ' iteration(s) · ' + res.durationMs + 'ms · Model: ' + res.model;
         document.getElementById('aiStatsText').textContent = statsText;
         statsEl.style.display = 'block';
 
@@ -787,8 +829,10 @@ document.getElementById('content').addEventListener('click', function(ev) {
     var el = ev.target.closest('[data-action]');
     if (!el) return;
     var action = el.dataset.action;
-    if (action === 'edit') openEdit(JSON.parse(atob(el.dataset.item)));
-    else if (action === 'clone') openClone(el.dataset.id, el.dataset.name);
-    else if (action === 'delete') deleteEssence(el.dataset.id, el.dataset.name);
+    var essence = essencesById[el.dataset.id];
+    if (!essence) return;
+    if (action === 'edit') openEdit(essence);
+    else if (action === 'clone') openClone(essence.id, essence.name);
+    else if (action === 'delete') deleteEssence(essence.id, essence.name);
 });
 </script>

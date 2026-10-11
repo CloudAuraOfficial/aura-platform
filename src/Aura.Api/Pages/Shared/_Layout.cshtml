@@ -6,6 +6,7 @@
     <title>@ViewData["Title"] - Aura Platform</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/css/site.css" />
+    <script src="/js/aura-ui.js"></script>
 </head>
 <body>
     <nav class="nav">
@@ -18,7 +19,7 @@
             <a href="/dashboard" class="auth-only" style="display:none">Dashboard</a>
             <a href="/dashboard/essences" class="auth-only" style="display:none">Essences</a>
             <a href="/dashboard/deployments" class="auth-only" style="display:none">Deployments</a>
-            <a href="/dashboard/cloud-accounts" class="auth-only" style="display:none">Accounts</a>
+            <a href="/dashboard/cloud-accounts" class="auth-only" style="display:none">Cloud Accounts</a>
             <a href="/dashboard/users" class="auth-only" style="display:none">Users</a>
             <a href="/dashboard/experiments" class="auth-only" style="display:none">Experiments</a>
             <a href="/dashboard/audit" class="auth-only" style="display:none">Audit Log</a>
@@ -33,13 +34,6 @@
         <small>Aura Platform &copy; @DateTime.UtcNow.Year</small>
     </footer>
     <script>
-    // Global HTML escape function to prevent XSS (C6)
-    function esc(s) {
-        if (s == null) return '';
-        var d = document.createElement('div');
-        d.appendChild(document.createTextNode(String(s)));
-        return d.innerHTML;
-    }
     (function() {
         var link = document.getElementById('authLink');
         var token = localStorage.getItem('aura_token');
