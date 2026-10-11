@@ -28,9 +28,15 @@ public class AiEssenceBuilderServiceTests
     // that never parses to valid essence JSON — so every iteration "spends" tokens.
     private sealed class TokenBurningProvider : ILlmProvider
     {
+        public int Calls { get; private set; }
+
         public string ProviderName => "openrouter";
+
         public Task<LlmCompletionResult> GenerateAsync(LlmRequest request, CancellationToken ct = default)
-            => Task.FromResult(new LlmCompletionResult("not json", 10, 5, "test-model", true));
+        {
+            Calls++;
+            return Task.FromResult(new LlmCompletionResult("not json", 10, 5, "test-model", true));
+        }
     }
 
     private sealed class StubFactory : ILlmProviderFactory
@@ -121,6 +127,7 @@ public class AiEssenceBuilderServiceTests
             svc.GenerateAsync(userId, request, tenantId, CancellationToken.None));
 
         Assert.Equal("The stored key for 'openrouter' can't be read. Re-enter it in Account Settings.", ex.Message);
+        Assert.Equal(0, provider.Calls);
         Assert.Empty(await db.Set<AiGenerationLog>().ToListAsync());
     }
 }

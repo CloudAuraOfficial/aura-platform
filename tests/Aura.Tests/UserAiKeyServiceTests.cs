@@ -29,7 +29,7 @@ public class UserAiKeyServiceTests
         return new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
     }
 
-    private static async Task<Guid> SeedProvider(AuraDbContext db, string storedName)
+    private static async Task<Guid> SeedProvider(AuraDbContext db, string storedName, string ciphertext = "sk-secret")
     {
         var userId = Guid.NewGuid();
         db.UserAiProviders.Add(new UserAiProvider
@@ -37,7 +37,7 @@ public class UserAiKeyServiceTests
             TenantId = Guid.Empty, // matches the parameterless DbContext's tenant query filter
             UserId = userId,
             ProviderName = storedName,
-            EncryptedApiKey = "sk-secret"
+            EncryptedApiKey = ciphertext
         });
         await db.SaveChangesAsync();
         return userId;
@@ -108,31 +108,47 @@ public class UserAiKeyServiceTests
     }
 
     [Fact]
-    public async Task GetDecryptedKey_unreadable_message_and_log_never_contain_key_or_ciphertext()
+    public async Task GetDecryptedKey_unreadable_message_and_log_never_contain_the_stored_ciphertext()
     {
+        const string ciphertext = "CIPHERTEXT-MARKER-7f3a9c";
         var db = CreateInMemoryDb();
-        var userId = await SeedProvider(db, "openrouter");
+        var userId = await SeedProvider(db, "openrouter", ciphertext);
         var crypto = new Mock<ICryptoService>();
+        // The implementation's own message echoes the stored value. The service must not pass it on.
         crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
             .Throws(StoredSecretUnreadableException.FromCryptoFailure(
-                new CryptographicException("padding is invalid and cannot be removed; sk-secret")));
+                new CryptographicException($"padding is invalid; value was {ciphertext}")));
         var logger = new Mock<ILogger<UserAiKeyService>>();
         var svc = new UserAiKeyService(db, crypto.Object, logger.Object);
 
         var ex = await Assert.ThrowsAsync<StoredSecretUnreadableException>(() =>
             svc.GetDecryptedKeyAsync(userId, "openrouter"));
 
-        Assert.DoesNotContain("sk-secret", ex.Message);
+        Assert.DoesNotContain(ciphertext, ex.Message);
         logger.Verify(l => l.Log(
                 LogLevel.Warning,
                 It.IsAny<EventId>(),
                 It.Is<It.IsAnyType>((state, _) =>
                     state.ToString()!.Contains("provider=openrouter") &&
                     state.ToString()!.Contains("error=CryptographicException") &&
-                    !state.ToString()!.Contains("sk-secret")),
-                It.IsAny<Exception?>(),
+                    !state.ToString()!.Contains(ciphertext)),
+                It.Is<Exception?>(e => e == null),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
+        logger.Verify(l => l.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains(ciphertext)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+        logger.Verify(l => l.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.Is<Exception?>(e => e != null && e.ToString().Contains(ciphertext)),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
     }
 
     [Fact]
