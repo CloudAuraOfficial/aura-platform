@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
+using Aura.Core.Exceptions;
 using Aura.Core.Interfaces;
 using Aura.Core.Operations;
 using Aura.Infrastructure.Data;

@@ -1,4 +1,4 @@
-namespace Aura.Infrastructure.Services;
+namespace Aura.Core.Exceptions;
 
 /// <summary>
 /// An essence the deployment parser rejects, with a message written for the user that names the layer.
