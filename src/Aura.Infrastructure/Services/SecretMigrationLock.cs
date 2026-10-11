@@ -40,7 +40,7 @@ public sealed class PostgresSecretMigrationLock : ISecretMigrationLock
         // Keep the connection open. EF would otherwise return it to the pool between commands, and the lock
         // would be left on a connection nobody can unlock.
         await _db.Database.OpenConnectionAsync(ct);
-        _held = await _db.Database.SqlQuery<bool>($"SELECT pg_try_advisory_lock({LockKey})").SingleAsync(ct);
+        _held = await _db.Database.SqlQuery<bool>($"SELECT pg_try_advisory_lock({LockKey}) AS \"Value\"").SingleAsync(ct);
         if (!_held)
             await _db.Database.CloseConnectionAsync();
 
@@ -54,7 +54,7 @@ public sealed class PostgresSecretMigrationLock : ISecretMigrationLock
 
         try
         {
-            await _db.Database.SqlQuery<bool>($"SELECT pg_advisory_unlock({LockKey})").SingleAsync(ct);
+            await _db.Database.SqlQuery<bool>($"SELECT pg_advisory_unlock({LockKey}) AS \"Value\"").SingleAsync(ct);
         }
         finally
         {

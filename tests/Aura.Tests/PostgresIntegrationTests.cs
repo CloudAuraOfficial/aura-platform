@@ -477,4 +477,21 @@ public class PostgresIntegrationTests : IAsyncLifetime
             Assert.Null(byName["no-runs"].LatestRun);
         }
     }
+
+    [Fact]
+    public async Task SecretMigrationLock_is_exclusive_on_real_postgres()
+    {
+        // SQLite tests cannot run this SQL; this one guards the raw query shape (EF SqlQuery<T> needs a "Value" column).
+        await using var dbA = CreateDb();
+        await using var dbB = CreateDb();
+        var first = new Aura.Infrastructure.Services.PostgresSecretMigrationLock(dbA);
+        var second = new Aura.Infrastructure.Services.PostgresSecretMigrationLock(dbB);
+
+        Assert.True(await first.TryAcquireAsync(CancellationToken.None));
+        Assert.False(await second.TryAcquireAsync(CancellationToken.None));
+
+        await first.ReleaseAsync(CancellationToken.None);
+        Assert.True(await second.TryAcquireAsync(CancellationToken.None));
+        await second.ReleaseAsync(CancellationToken.None);
+    }
 }
