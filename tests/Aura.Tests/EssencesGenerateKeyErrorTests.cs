@@ -4,6 +4,7 @@ using Aura.Api.Controllers;
 using Aura.Api.Services;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
+using Aura.Core.Exceptions;
 using Aura.Core.Enums;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
@@ -52,7 +53,7 @@ public class EssencesGenerateKeyErrorTests
     // Reproduces gap G4 from #35: a stored key that can't be decrypted used to fall through to the
     // middleware and come back as a generic 500 internal_error. It must now be a 422 in the standard shape.
     [Fact]
-    public async Task Generate_returns_422_stored_key_unreadable_when_saved_key_cannot_be_decrypted()
+    public async Task Generate_returns_422_stored_secret_unreadable_when_saved_key_cannot_be_decrypted()
     {
         var db = CreateInMemoryDb();
         var userId = Guid.NewGuid();
@@ -68,16 +69,17 @@ public class EssencesGenerateKeyErrorTests
         await db.SaveChangesAsync();
 
         var crypto = new Mock<ICryptoService>();
-        crypto.Setup(c => c.Decrypt(It.IsAny<string>())).Throws(new CryptographicException());
+        crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
+            .Throws(StoredSecretUnreadableException.FromCryptoFailure(new CryptographicException()));
         var controller = Controller(db, userId, crypto);
 
         var result = await controller.Generate(
-            new GenerateEssenceRequest("build me a vnet", cloudId, "openrouter"));
+            new GenerateEssenceRequest("build me a vnet", cloudId, "OpenRouter"));
 
         var obj = Assert.IsType<UnprocessableEntityObjectResult>(result);
         var error = Assert.IsType<ErrorResponse>(obj.Value);
         Assert.Equal(422, error.StatusCode);
-        Assert.Equal("stored_key_unreadable", error.Error);
-        Assert.Equal("stored key for 'openrouter' can't be read, re-enter it in Account Settings.", error.Message);
+        Assert.Equal("stored_secret_unreadable", error.Error);
+        Assert.Equal("The stored key for 'OpenRouter' can't be read. Re-enter it in Account Settings.", error.Message);
     }
 }

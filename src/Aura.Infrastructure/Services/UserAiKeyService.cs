@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Aura.Core.Exceptions;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
@@ -37,13 +36,14 @@ public class UserAiKeyService
         {
             return _crypto.Decrypt(provider.EncryptedApiKey);
         }
-        catch (Exception ex) when (ex is CryptographicException or FormatException or ArgumentException)
+        catch (StoredSecretUnreadableException ex)
         {
-            // Log the exception type only. The message and the stored ciphertext must never reach logs.
+            // Log the failure type only. The message and the stored ciphertext must never reach logs.
             _logger.LogWarning(
                 "Stored AI provider key can't be decrypted: user={UserId}, provider={Provider}, error={ErrorType}",
-                userId, normalized, ex.GetType().Name);
-            throw new StoredKeyUnreadableException(normalized);
+                userId, normalized, ex.InnerException?.GetType().Name ?? nameof(StoredSecretUnreadableException));
+            // Name the provider as the caller selected it, so the message matches what the user picked.
+            throw StoredSecretUnreadableException.ForProviderKey(providerName, ex);
         }
     }
 }

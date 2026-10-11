@@ -88,11 +88,11 @@ public class AiEssenceBuilderServiceTests
         Assert.Equal("openrouter", log.ProviderName);
     }
 
-    // A key that can't be decrypted must surface as StoredKeyUnreadableException (the controller
-    // maps it to a 422 with a re-enter message), must not be wrapped, and must not call the LLM
-    // or record usage, since no tokens were spent.
+    // A key that can't be decrypted must surface as StoredSecretUnreadableException (the middleware
+    // maps it to a 422 with a re-enter message), must not call the LLM, and must not record usage,
+    // since no tokens were spent.
     [Fact]
-    public async Task GenerateAsync_throws_StoredKeyUnreadable_without_calling_provider_or_logging_usage()
+    public async Task GenerateAsync_throws_provider_key_error_without_calling_provider_or_logging_usage()
     {
         var db = CreateInMemoryDb();
         var userId = Guid.NewGuid();
@@ -110,17 +110,17 @@ public class AiEssenceBuilderServiceTests
 
         var crypto = new Mock<ICryptoService>();
         crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
-            .Throws(new CryptographicException());
+            .Throws(StoredSecretUnreadableException.FromCryptoFailure(new CryptographicException()));
         var keySvc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
         var provider = new TokenBurningProvider();
         var svc = new AiEssenceBuilderService(
             new StubFactory(provider), keySvc, db, new EssenceValidator(), Mock.Of<ILogger<AiEssenceBuilderService>>());
         var request = new GenerateEssenceRequest("build me a vnet", cloudId, "openrouter");
 
-        var ex = await Assert.ThrowsAsync<StoredKeyUnreadableException>(() =>
+        var ex = await Assert.ThrowsAsync<StoredSecretUnreadableException>(() =>
             svc.GenerateAsync(userId, request, tenantId, CancellationToken.None));
 
-        Assert.Equal("stored key for 'openrouter' can't be read, re-enter it in Account Settings.", ex.Message);
+        Assert.Equal("The stored key for 'openrouter' can't be read. Re-enter it in Account Settings.", ex.Message);
         Assert.Empty(await db.Set<AiGenerationLog>().ToListAsync());
     }
 }

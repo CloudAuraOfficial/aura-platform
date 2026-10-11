@@ -338,9 +338,9 @@ public class EssencesController : ControllerBase
         {
             return BadRequest(new ErrorResponse("bad_request", ex.Message, 400));
         }
-        catch (StoredKeyUnreadableException ex)
+        catch (StoredSecretUnreadableException ex)
         {
-            return UnprocessableEntity(new ErrorResponse("stored_key_unreadable", ex.Message, 422));
+            return UnprocessableEntity(new ErrorResponse("stored_secret_unreadable", ex.Message, 422));
         }
         catch (InvalidOperationException ex)
         {

@@ -68,26 +68,43 @@ public class UserAiKeyServiceTests
     }
 
     // Keys encrypted under another secret fail in different ways: bad padding, a stored value
-    // that isn't base64, or a value too short to hold the IV. All must read as "re-enter".
+    // that isn't base64, or a value too short to hold the IV. The crypto layer reports all of them
+    // as StoredSecretUnreadableException. This service names the provider and nothing else.
     [Theory]
     [InlineData(typeof(CryptographicException))]
     [InlineData(typeof(FormatException))]
     [InlineData(typeof(ArgumentOutOfRangeException))]
-    public async Task GetDecryptedKey_throws_StoredKeyUnreadable_when_decrypt_fails(Type failure)
+    public async Task GetDecryptedKey_throws_provider_key_error_when_crypto_reports_unreadable(Type failure)
+    {
+        var db = CreateInMemoryDb();
+        var userId = await SeedProvider(db, "openrouter");
+        var inner = (Exception)Activator.CreateInstance(failure, "internal detail")!;
+        var crypto = new Mock<ICryptoService>();
+        crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
+            .Throws(StoredSecretUnreadableException.FromCryptoFailure(inner));
+        var svc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
+
+        var ex = await Assert.ThrowsAsync<StoredSecretUnreadableException>(() =>
+            svc.GetDecryptedKeyAsync(userId, "OpenRouter"));
+
+        Assert.Same(inner, ex.InnerException!.InnerException);
+        Assert.Equal(
+            "The stored key for 'OpenRouter' can't be read. Re-enter it in Account Settings.", ex.Message);
+    }
+
+    // The service handles only the typed exception. A raw failure from an implementation that breaks
+    // the ICryptoService contract is a bug and must not be relabelled as a stored-key problem.
+    [Fact]
+    public async Task GetDecryptedKey_does_not_relabel_untyped_crypto_failures()
     {
         var db = CreateInMemoryDb();
         var userId = await SeedProvider(db, "openrouter");
         var crypto = new Mock<ICryptoService>();
-        crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
-            .Throws((Exception)Activator.CreateInstance(failure, "internal detail")!);
+        crypto.Setup(c => c.Decrypt(It.IsAny<string>())).Throws(new CryptographicException());
         var svc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
 
-        var ex = await Assert.ThrowsAsync<StoredKeyUnreadableException>(() =>
-            svc.GetDecryptedKeyAsync(userId, "OpenRouter"));
-
-        Assert.Equal("openrouter", ex.ProviderName);
-        Assert.Equal(
-            "stored key for 'openrouter' can't be read, re-enter it in Account Settings.", ex.Message);
+        await Assert.ThrowsAsync<CryptographicException>(() =>
+            svc.GetDecryptedKeyAsync(userId, "openrouter"));
     }
 
     [Fact]
@@ -97,11 +114,12 @@ public class UserAiKeyServiceTests
         var userId = await SeedProvider(db, "openrouter");
         var crypto = new Mock<ICryptoService>();
         crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
-            .Throws(new CryptographicException("padding is invalid and cannot be removed; sk-secret"));
+            .Throws(StoredSecretUnreadableException.FromCryptoFailure(
+                new CryptographicException("padding is invalid and cannot be removed; sk-secret")));
         var logger = new Mock<ILogger<UserAiKeyService>>();
         var svc = new UserAiKeyService(db, crypto.Object, logger.Object);
 
-        var ex = await Assert.ThrowsAsync<StoredKeyUnreadableException>(() =>
+        var ex = await Assert.ThrowsAsync<StoredSecretUnreadableException>(() =>
             svc.GetDecryptedKeyAsync(userId, "openrouter"));
 
         Assert.DoesNotContain("sk-secret", ex.Message);
