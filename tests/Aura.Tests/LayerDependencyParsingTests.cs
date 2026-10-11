@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Aura.Core.Exceptions;
 using Aura.Infrastructure.Services;
 using Xunit;
 

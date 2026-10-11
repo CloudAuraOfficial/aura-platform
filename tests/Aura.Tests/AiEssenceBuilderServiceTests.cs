@@ -1,7 +1,9 @@
+using System.Security.Cryptography;
 using Aura.Api.Services;
 using Aura.Core.DTOs;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
+using Aura.Core.Exceptions;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
@@ -26,9 +28,15 @@ public class AiEssenceBuilderServiceTests
     // that never parses to valid essence JSON — so every iteration "spends" tokens.
     private sealed class TokenBurningProvider : ILlmProvider
     {
+        public int Calls { get; private set; }
+
         public string ProviderName => "openrouter";
+
         public Task<LlmCompletionResult> GenerateAsync(LlmRequest request, CancellationToken ct = default)
-            => Task.FromResult(new LlmCompletionResult("not json", 10, 5, "test-model", true));
+        {
+            Calls++;
+            return Task.FromResult(new LlmCompletionResult("not json", 10, 5, "test-model", true));
+        }
     }
 
     private sealed class StubFactory : ILlmProviderFactory
@@ -58,7 +66,7 @@ public class AiEssenceBuilderServiceTests
 
         var crypto = new Mock<ICryptoService>();
         crypto.Setup(c => c.Decrypt(It.IsAny<string>())).Returns<string>(s => s);
-        var keySvc = new UserAiKeyService(db, crypto.Object);
+        var keySvc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
         var svc = new AiEssenceBuilderService(
             new StubFactory(new TokenBurningProvider()), keySvc, db,
             new EssenceValidator(),
@@ -84,5 +92,42 @@ public class AiEssenceBuilderServiceTests
         Assert.Equal(30, log.InputTokens);          // 10 × 3 iterations
         Assert.Equal(15, log.OutputTokens);         // 5 × 3 iterations
         Assert.Equal("openrouter", log.ProviderName);
+    }
+
+    // A key that can't be decrypted must surface as StoredSecretUnreadableException (the middleware
+    // maps it to a 422 with a re-enter message), must not call the LLM, and must not record usage,
+    // since no tokens were spent.
+    [Fact]
+    public async Task GenerateAsync_throws_provider_key_error_without_calling_provider_or_logging_usage()
+    {
+        var db = CreateInMemoryDb();
+        var userId = Guid.NewGuid();
+        var tenantId = Guid.Empty;
+        var cloudId = Guid.NewGuid();
+        db.UserAiProviders.Add(new UserAiProvider
+        {
+            TenantId = tenantId, UserId = userId, ProviderName = "openrouter", EncryptedApiKey = "not-decryptable"
+        });
+        db.CloudAccounts.Add(new CloudAccount
+        {
+            Id = cloudId, TenantId = tenantId, Provider = CloudProvider.Azure, Label = "acct"
+        });
+        await db.SaveChangesAsync();
+
+        var crypto = new Mock<ICryptoService>();
+        crypto.Setup(c => c.Decrypt(It.IsAny<string>()))
+            .Throws(StoredSecretUnreadableException.FromCryptoFailure(new CryptographicException()));
+        var keySvc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
+        var provider = new TokenBurningProvider();
+        var svc = new AiEssenceBuilderService(
+            new StubFactory(provider), keySvc, db, new EssenceValidator(), Mock.Of<ILogger<AiEssenceBuilderService>>());
+        var request = new GenerateEssenceRequest("build me a vnet", cloudId, "openrouter");
+
+        var ex = await Assert.ThrowsAsync<StoredSecretUnreadableException>(() =>
+            svc.GenerateAsync(userId, request, tenantId, CancellationToken.None));
+
+        Assert.Equal("The stored key for 'openrouter' can't be read. Re-enter it in Account Settings.", ex.Message);
+        Assert.Equal(0, provider.Calls);
+        Assert.Empty(await db.Set<AiGenerationLog>().ToListAsync());
     }
 }

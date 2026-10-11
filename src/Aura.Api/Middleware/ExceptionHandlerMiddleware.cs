@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aura.Core.DTOs;
+using Aura.Core.Exceptions;
 
 namespace Aura.Api.Middleware;
 
@@ -19,6 +20,16 @@ public class ExceptionHandlerMiddleware
         try
         {
             await _next(context);
+        }
+        catch (StoredSecretUnreadableException ex)
+        {
+            // A user-state problem, not a server fault: the user has to re-enter the secret. The message is
+            // written for the user and never contains the secret. Callers log it where the secret is identified.
+            context.Response.StatusCode = 422;
+            context.Response.ContentType = "application/json";
+
+            var error = new ErrorResponse("stored_secret_unreadable", ex.Message, 422);
+            await context.Response.WriteAsJsonAsync(error);
         }
         catch (Exception ex)
         {

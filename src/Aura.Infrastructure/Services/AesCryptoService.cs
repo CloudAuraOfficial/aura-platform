@@ -1,11 +1,14 @@
 using System.Security.Cryptography;
 using System.Text;
+using Aura.Core.Exceptions;
 using Aura.Core.Interfaces;
 
 namespace Aura.Infrastructure.Services;
 
 public class AesCryptoService : ICryptoService
 {
+    private const int IvLength = 16;
+
     private readonly byte[] _key;
 
     public AesCryptoService(string base64Key)
@@ -34,13 +37,28 @@ public class AesCryptoService : ICryptoService
 
     public string Decrypt(string cipherText)
     {
+        try
+        {
+            return DecryptOrThrow(cipherText);
+        }
+        catch (Exception ex) when (ex is CryptographicException or FormatException)
+        {
+            // Callers see only the typed exception. The inner exception is kept for logs.
+            throw StoredSecretUnreadableException.FromCryptoFailure(ex);
+        }
+    }
+
+    private string DecryptOrThrow(string cipherText)
+    {
         var fullCipher = Convert.FromBase64String(cipherText);
+        if (fullCipher.Length <= IvLength)
+            throw new CryptographicException("Stored value is too short to hold an IV and ciphertext.");
 
         using var aes = Aes.Create();
         aes.Key = _key;
 
-        var iv = fullCipher[..16];
-        var cipher = fullCipher[16..];
+        var iv = fullCipher[..IvLength];
+        var cipher = fullCipher[IvLength..];
 
         aes.IV = iv;
         using var decryptor = aes.CreateDecryptor();

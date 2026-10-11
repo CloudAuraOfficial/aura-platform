@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
+using Aura.Core.Exceptions;
 using Aura.Core.Operations;
 using Aura.Infrastructure.Services;
 

@@ -1,6 +1,8 @@
+using Aura.Core.Exceptions;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Aura.Infrastructure.Services;
 
@@ -8,11 +10,13 @@ public class UserAiKeyService
 {
     private readonly AuraDbContext _db;
     private readonly ICryptoService _crypto;
+    private readonly ILogger<UserAiKeyService> _logger;
 
-    public UserAiKeyService(AuraDbContext db, ICryptoService crypto)
+    public UserAiKeyService(AuraDbContext db, ICryptoService crypto, ILogger<UserAiKeyService> logger)
     {
         _db = db;
         _crypto = crypto;
+        _logger = logger;
     }
 
     public async Task<string?> GetDecryptedKeyAsync(Guid userId, string providerName, CancellationToken ct = default)
@@ -28,6 +32,18 @@ public class UserAiKeyService
         if (provider is null || string.IsNullOrEmpty(provider.EncryptedApiKey))
             return null;
 
-        return _crypto.Decrypt(provider.EncryptedApiKey);
+        try
+        {
+            return _crypto.Decrypt(provider.EncryptedApiKey);
+        }
+        catch (StoredSecretUnreadableException ex)
+        {
+            // Log the failure type only. The message and the stored ciphertext must never reach logs.
+            _logger.LogWarning(
+                "Stored AI provider key can't be decrypted: user={UserId}, provider={Provider}, error={ErrorType}",
+                userId, normalized, ex.InnerException?.GetType().Name ?? nameof(StoredSecretUnreadableException));
+            // Name the provider as the caller selected it, so the message matches what the user picked.
+            throw StoredSecretUnreadableException.ForProviderKey(providerName, ex);
+        }
     }
 }

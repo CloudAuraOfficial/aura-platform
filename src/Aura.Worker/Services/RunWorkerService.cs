@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Aura.Core.Entities;
 using Aura.Core.Enums;
+using Aura.Core.Exceptions;
 using Aura.Core.Interfaces;
 using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
@@ -505,7 +506,7 @@ public class RunWorkerService : BackgroundService
     /// creds. Cache (held by the worker process) holds N decrypted sets on
     /// multi-cloud runs, but no handler ever sees more than its own.
     /// </summary>
-    private async Task<Dictionary<string, string>> BuildLayerEnvVarsAsync(
+    internal async Task<Dictionary<string, string>> BuildLayerEnvVarsAsync(
         AuraDbContext db, ICryptoService crypto, IAuditService auditService,
         DeploymentRun run, DeploymentLayer layer,
         Dictionary<string, string> snapshotEnvVars,
@@ -543,7 +544,7 @@ public class RunWorkerService : BackgroundService
 
             if (cloudAccount is not null && !string.IsNullOrEmpty(cloudAccount.EncryptedCredentials))
             {
-                var decrypted = crypto.Decrypt(cloudAccount.EncryptedCredentials);
+                var decrypted = DecryptCredentials(crypto, cloudAccount);
                 var creds = JsonSerializer.Deserialize<Dictionary<string, string>>(decrypted)
                     ?? new Dictionary<string, string>();
                 credCache[accountId] = creds;
@@ -563,6 +564,11 @@ public class RunWorkerService : BackgroundService
                 ByosResolver.PopulateEnvVars(envVars, creds);
             }
         }
+        catch (StoredSecretUnreadableException)
+        {
+            // The layer must fail with this reason. Running it without credentials would hide the cause.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
@@ -571,6 +577,19 @@ public class RunWorkerService : BackgroundService
         }
 
         return envVars;
+    }
+
+    // Names the account so the layer's failure output tells the operator what to re-enter.
+    private static string DecryptCredentials(ICryptoService crypto, CloudAccount account)
+    {
+        try
+        {
+            return crypto.Decrypt(account.EncryptedCredentials);
+        }
+        catch (StoredSecretUnreadableException ex)
+        {
+            throw StoredSecretUnreadableException.ForCloudAccount(account.Label, ex);
+        }
     }
 
     private static ILayerExecutor ResolveExecutor(IServiceProvider sp, ExecutorType type) => type switch
