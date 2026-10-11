@@ -227,11 +227,17 @@ public class DeploymentsController : ControllerBase
             return BadRequest(new ErrorResponse("bad_request",
                 $"Cannot cancel a run with status '{run.Status}'.", 400));
 
+        // #52: a Running run may have created cloud resources, so its
+        // RunPolicy.Always cleanup layers stay pending for the worker to run.
+        // A Queued run has created nothing, so every layer is skipped as before.
+        var keepCleanup = run.Status == RunStatus.Running;
+
         run.Status = RunStatus.Cancelled;
         run.CompletedAt = DateTime.UtcNow;
 
         foreach (var layer in run.Layers.Where(l =>
-            l.Status == LayerStatus.Pending || l.Status == LayerStatus.Running))
+            (l.Status == LayerStatus.Pending || l.Status == LayerStatus.Running)
+            && !(keepCleanup && l.RunPolicy == RunPolicy.Always)))
         {
             layer.Status = LayerStatus.Skipped;
             layer.Output = "Cancelled by user.";

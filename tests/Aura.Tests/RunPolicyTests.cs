@@ -261,4 +261,64 @@ public class RunPolicyTests
             outcomes[layer.LayerName] = LayerStatus.Succeeded; // simulate success
         }
     }
+
+    // ─────────────── User cancel (#52) ───────────────
+
+    [Fact]
+    public void OnSuccessLayer_UserCancelled_Skips()
+    {
+        var reason = RunWorkerService.ComputeSkipReason(
+            Layer("Create"), failed: false, alwaysLayers: [], outcomes: [], cancelled: true);
+        Assert.Equal("cancelled by user", reason);
+    }
+
+    [Fact]
+    public void AlwaysLayer_UserCancelled_CancelBeforeCreate_RunsHarmlessly()
+    {
+        // Cancel landed before any create: teardown still executes, and its
+        // executor finds nothing to delete.
+        var alwaysLayers = new HashSet<string> { "Ec2Teardown" };
+        var reason = RunWorkerService.ComputeSkipReason(
+            Layer("Ec2Teardown", RunPolicy.Always, "Ec2"), failed: false, alwaysLayers,
+            outcomes: new() { ["Ec2"] = LayerStatus.Skipped }, cancelled: true);
+        Assert.Null(reason);
+    }
+
+    [Fact]
+    public void AlwaysLayer_UserCancelledMidCreate_RunsCleanup()
+    {
+        // Cancel landed mid-create: Vpc and Ec2 succeeded, then cancelled.
+        // Teardowns must still run, in dependency order.
+        var alwaysLayers = new HashSet<string> { "VpcTeardown", "Ec2Teardown" };
+        var outcomes = new Dictionary<string, LayerStatus>
+        {
+            ["Vpc"] = LayerStatus.Succeeded,
+            ["Ec2"] = LayerStatus.Succeeded,
+            ["Create"] = LayerStatus.Skipped
+        };
+
+        var ec2 = RunWorkerService.ComputeSkipReason(
+            Layer("Ec2Teardown", RunPolicy.Always, "Ec2"), failed: false, alwaysLayers, outcomes, cancelled: true);
+        Assert.Null(ec2);
+        outcomes["Ec2Teardown"] = LayerStatus.Succeeded;
+
+        var vpc = RunWorkerService.ComputeSkipReason(
+            Layer("VpcTeardown", RunPolicy.Always, "Ec2Teardown"), failed: false, alwaysLayers, outcomes, cancelled: true);
+        Assert.Null(vpc);
+    }
+
+    [Fact]
+    public void AlwaysLayer_UserCancelled_EarlierTeardownFailed_IsSkipped()
+    {
+        // Cleanup dependency rule still applies under cancel.
+        var alwaysLayers = new HashSet<string> { "Ec2Teardown", "VpcTeardown" };
+        var outcomes = new Dictionary<string, LayerStatus>
+        {
+            ["Ec2Teardown"] = LayerStatus.Failed
+        };
+
+        var reason = RunWorkerService.ComputeSkipReason(
+            Layer("VpcTeardown", RunPolicy.Always, "Ec2Teardown"), failed: false, alwaysLayers, outcomes, cancelled: true);
+        Assert.Equal("cleanup dependency 'Ec2Teardown' did not succeed", reason);
+    }
 }
