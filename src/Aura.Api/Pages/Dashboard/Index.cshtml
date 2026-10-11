@@ -85,7 +85,7 @@ async function loadDashboard() {
             <th>Name</th><th>Provider</th><th>Layers</th><th>Version</th><th>Last Updated</th>
         </tr></thead><tbody>${essences.map(e => {
             return `<tr><td><strong>${esc(e.name)}</strong></td>
-                <td><span class="badge badge-info">${esc(providerLabel(e.provider))}</span></td>
+                <td>${e.provider && e.provider !== '-' ? `<span class="badge badge-info">${esc(providerLabel(e.provider))}</span>` : ''}</td>
                 <td>${e.layerCount} layer${e.layerCount !== 1 ? 's' : ''}</td>
                 <td>v${esc(e.currentVersion)}</td>
                 <td>${esc(new Date(e.updatedAt).toLocaleString())}</td></tr>`;

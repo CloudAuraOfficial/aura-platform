@@ -53,7 +53,7 @@ function entityLabel(e) {
         <td><span class="badge badge-info">${esc(humanize(e.action))}</span></td>
         <td title="${esc(e.entityId || '')}">${esc(entityLabel(e))}</td>
         <td>${esc(e.detail) || '-'}</td>
-        <td>${esc(emails[e.userId] || 'Another user')}</td>
+        <td>${esc(emails[e.userId] || (/^0{8}-0{4}-0{4}-0{4}-0{12}$/.test(e.userId) ? 'System' : 'Another user'))}</td>
     </tr>`).join('')}</tbody></table>`;
 })();
 </script>

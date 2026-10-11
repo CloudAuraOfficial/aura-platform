@@ -66,6 +66,7 @@
     // Toast with an optional link, e.g. { href: '/dashboard/run?...', label: 'Open run' }.
     // Toasts with a link stay up longer so there is time to click them.
     function auraToast(msg, type, link) {
+        document.querySelectorAll('.toast').forEach(function (t) { t.remove(); });  // one toast at a time; they share a fixed spot
         var el = document.createElement('div');
         el.className = 'toast toast-' + (type || 'success');
         var text = document.createElement('span');
@@ -99,8 +100,8 @@
     }
 
     var EXECUTORS = {
-        operation: 'Azure SDK', emissionload: 'Container', powershell: 'PowerShell',
-        python: 'Python', csharp: 'C# SDK'
+        operation: 'Cloud SDK', emissionload: 'Container', powershell: 'PowerShell',
+        python: 'Python', csharpsdk: 'C# SDK'
     };
     function executorLabel(t) {
         if (!t) return '-';

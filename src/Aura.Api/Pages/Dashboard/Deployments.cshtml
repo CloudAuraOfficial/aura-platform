@@ -90,7 +90,7 @@ async function loadEssences() {
 async function openCreate() {
     document.getElementById('modalTitle').textContent = 'New Deployment';
     document.getElementById('saveBtn').textContent = 'Create';
-    document.getElementById('saveBtn').disabled = false;
+    document.getElementById('saveBtn').disabled = true;  // enabled once essences load
     document.getElementById('editId').value = '';
     document.getElementById('fName').value = '';
     document.getElementById('fCron').value = '';
@@ -102,6 +102,7 @@ async function openCreate() {
     document.getElementById('modal').classList.add('open');
 
     const loaded = await loadEssences();
+    if (document.getElementById('editId').value) return;  // user switched to Edit while loading
     const select = document.getElementById('fEssence');
     select.innerHTML = essences.map(e =>
         `<option value="${esc(e.id)}">${esc(e.name)} (v${esc(e.currentVersion)})</option>`).join('');
@@ -113,6 +114,8 @@ async function openCreate() {
         error.innerHTML = 'A deployment runs an essence, so you need one first. <a href="/dashboard/essences">Create an essence</a>, then come back here.';
         error.style.display = 'block';
         document.getElementById('saveBtn').disabled = true;
+    } else {
+        document.getElementById('saveBtn').disabled = false;
     }
 }
 
@@ -149,6 +152,7 @@ async function saveDeployment(e) {
         document.getElementById('modalError').style.display = 'block';
         return false;
     }
+    if (id) delete validationById[id];  // structure may have changed; old result is stale
     closeModal();
     auraToast(id ? 'Deployment updated' : 'Deployment created');
     loadDeployments();
@@ -174,6 +178,7 @@ async function triggerRun(deploymentId, btn) {
         auraToast(data.message || 'Could not start the run. Try again.', 'error');
         return;
     }
+    delete validationById[deploymentId];
     const name = deploymentsById[deploymentId]?.name;
     auraToast(name ? `Run started for "${name}".` : 'Run started.', 'success',
         { href: runHref(deploymentId, data.id), label: 'Open in Run Theater →' });

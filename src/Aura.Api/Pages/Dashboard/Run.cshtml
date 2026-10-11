@@ -129,7 +129,7 @@ async function streamLogs() {
     document.getElementById('logTitle').textContent = 'Live Logs';
     try {
         const res = await fetch(`/api/v1/deployments/${deploymentId}/runs/${runId}/logs/stream`, {
-            headers: { 'Authorization': 'Bearer ' + token }
+            headers: { 'Authorization': 'Bearer ' + localStorage.getItem('aura_token') }
         });
         if (!res.ok || !res.body) throw new Error('stream unavailable (' + res.status + ')');
         const reader = res.body.getReader();

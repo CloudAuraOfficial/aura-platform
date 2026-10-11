@@ -485,6 +485,17 @@ async function ensureAccounts() {
     return true;
 }
 
+// Declared provider wins; otherwise derive it from the accounts the layers (and the essence) point at.
+function essenceProvider(e, ej) {
+    if (ej.baseEssence && ej.baseEssence.cloudProvider) return providerLabel(ej.baseEssence.cloudProvider);
+    var ids = Object.values(ej.layers || {}).map(function(l) { return l && l.cloudAccountId; }).filter(Boolean);
+    if (ids.length === 0 && e.cloudAccountId) ids = [e.cloudAccountId];
+    var providers = {};
+    ids.forEach(function(id) { var a = accounts.find(function(x) { return x.id === id; }); if (a) providers[providerLabel(a.provider)] = 1; });
+    var names = Object.keys(providers);
+    return names.length > 1 ? 'Multi-cloud' : (names[0] || '-');
+}
+
 function accountLabel(id) {
     var a = accounts.find(function(x) { return x.id === id; });
     return a ? a.label + ' (' + providerLabel(a.provider) + ')' : 'Unknown account';
@@ -620,7 +631,7 @@ async function loadEssences() {
         var layerCount = 0;
         try {
             var ej = typeof e.essenceJson === 'string' ? JSON.parse(e.essenceJson) : e.essenceJson;
-            provider = providerLabel(ej.baseEssence && ej.baseEssence.cloudProvider);
+            provider = essenceProvider(e, ej);
             layerCount = ej.layers ? Object.keys(ej.layers).length : 0;
         } catch(ex) {}
 
@@ -721,7 +732,7 @@ document.getElementById('aiForm').addEventListener('submit', function(ev) {
         try {
             httpRes = await fetch('/api/v1/essences/generate', {
                 method: 'POST',
-                headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+                headers: { 'Authorization': 'Bearer ' + localStorage.getItem('aura_token'), 'Content-Type': 'application/json' },
                 body: JSON.stringify({ prompt: prompt, cloudAccountId: accountId, provider: provider })
             });
         } catch (e) {

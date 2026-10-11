@@ -300,3 +300,7 @@ pre {
     padding: 0.75rem 1rem; white-space: pre-wrap; word-break: break-word;
 }
 .log-line { margin: 0; }
+
+/* Text links inside tables (e.g. recent runs) - default browser blue is unreadable on the dark theme */
+td a:not(.btn) { color: var(--accent-hover); text-decoration: none; }
+td a:not(.btn):hover { text-decoration: underline; }

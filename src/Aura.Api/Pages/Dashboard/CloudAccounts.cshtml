@@ -146,7 +146,7 @@ async function loadAccounts() {
     const data = await api('/api/v1/cloud-accounts?limit=100');
     if (!data) return;
     if (data.error === 'forbidden') {
-        content.innerHTML = errorState('Only admins can manage cloud accounts.');
+        content.innerHTML = errorState('You do not have access to cloud accounts.');
         return;
     }
     if (data.error) {
