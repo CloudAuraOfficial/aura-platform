@@ -33,12 +33,13 @@ public class EssencesGenerateKeyErrorTests
         var providers = new Mock<ILlmProviderFactory>();
         providers.Setup(f => f.SupportedProviders).Returns(new[] { "openrouter" });
         var aiBuilder = new AiEssenceBuilderService(
-            providers.Object, keySvc, db, Mock.Of<ILogger<AiEssenceBuilderService>>());
+            providers.Object, keySvc, db, new EssenceValidator(), Mock.Of<ILogger<AiEssenceBuilderService>>());
 
         var tenant = new Mock<ITenantContext>();
         tenant.Setup(t => t.TenantId).Returns(Guid.Empty);
 
-        var controller = new EssencesController(db, tenant.Object, Mock.Of<IAuditService>(), aiBuilder);
+        var controller = new EssencesController(db, tenant.Object, Mock.Of<IAuditService>(), aiBuilder, new EssenceValidator(),
+            Mock.Of<ILogger<EssencesController>>());
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "test"));
         controller.ControllerContext = new ControllerContext

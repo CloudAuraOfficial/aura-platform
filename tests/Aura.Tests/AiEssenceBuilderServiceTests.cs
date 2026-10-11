@@ -114,7 +114,7 @@ public class AiEssenceBuilderServiceTests
         var keySvc = new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>());
         var provider = new TokenBurningProvider();
         var svc = new AiEssenceBuilderService(
-            new StubFactory(provider), keySvc, db, Mock.Of<ILogger<AiEssenceBuilderService>>());
+            new StubFactory(provider), keySvc, db, new EssenceValidator(), Mock.Of<ILogger<AiEssenceBuilderService>>());
         var request = new GenerateEssenceRequest("build me a vnet", cloudId, "openrouter");
 
         var ex = await Assert.ThrowsAsync<StoredKeyUnreadableException>(() =>

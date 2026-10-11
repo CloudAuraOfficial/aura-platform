@@ -149,7 +149,7 @@ public class EssenceGenerationE2ETests
         var logger = new CapturingLogger<AiEssenceBuilderService>();
         var service = new AiEssenceBuilderService(
             new LlmProviderFactory(new ILlmProvider[] { provider }),
-            new UserAiKeyService(db, crypto.Object),
+            new UserAiKeyService(db, crypto.Object, Mock.Of<ILogger<UserAiKeyService>>()),
             db,
             new EssenceValidator(),
             logger);
