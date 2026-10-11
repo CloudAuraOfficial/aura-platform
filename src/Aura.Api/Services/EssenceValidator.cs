@@ -103,6 +103,7 @@ public sealed class EssenceValidator : IEssenceValidator
     private static List<string> ShapeProblems(JsonElement layers)
     {
         var problems = new List<string>();
+        var layerNames = layers.EnumerateObject().Select(l => l.Name).ToHashSet();
         foreach (var layer in layers.EnumerateObject())
         {
             var name = layer.Name;
@@ -128,6 +129,12 @@ public sealed class EssenceValidator : IEssenceValidator
             if (value.TryGetProperty("dependsOn", out var deps) && deps.ValueKind == JsonValueKind.Array
                 && deps.EnumerateArray().Any(d => d.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)))
                 problems.Add($"Layer '{name}': dependsOn must list layer names.");
+            // A dependency on a disabled layer is dropped at run creation (intended: disable a step without editing
+            // its dependents). A name that matches no layer at all is a typo, so it is rejected.
+            else if (value.TryGetProperty("dependsOn", out var named) && named.ValueKind == JsonValueKind.Array)
+                foreach (var dep in named.EnumerateArray().Where(x => x.ValueKind == JsonValueKind.String).Select(x => x.GetString()!))
+                    if (!layerNames.Contains(dep))
+                        problems.Add($"Layer '{name}' depends on '{dep}', which does not exist.");
 
             string? operationType;
             try

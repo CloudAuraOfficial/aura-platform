@@ -437,6 +437,17 @@ public class EssenceValidatorTests
     }
 
     [Fact]
+    public void Save_accepts_a_dependency_on_a_disabled_layer()
+    {
+        // Run creation drops dependencies on disabled layers, so disabling a step needs no edit to its dependents.
+        var json = Essence(
+            "\"a\": { \"isEnabled\": false, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [] }, " +
+            "\"b\": { \"isEnabled\": true, \"operationType\": \"CreateResourceGroup\", \"parameters\": {}, \"dependsOn\": [\"a\"] }");
+
+        Assert.Null(Validator.CheckForSave(json).Error);
+    }
+
+    [Fact]
     public void Save_reports_every_structural_problem_not_just_the_first()
     {
         var json = Essence(
