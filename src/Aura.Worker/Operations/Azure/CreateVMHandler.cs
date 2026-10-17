@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations.Common;
 using Azure.ResourceManager.Compute;
 using Azure.ResourceManager.Compute.Models;
 using Azure.ResourceManager.Network;
@@ -79,6 +80,9 @@ public class CreateVMHandler : IOperationHandler
 
         var azureLocation = new global::Azure.Core.AzureLocation(location);
 
+        if (!ResourceTags.TryBuild(envVars, parameters, DateTime.UtcNow, out var tags, out var tagError))
+            return new LayerExecutionResult(false, tagError!);
+
         try
         {
             var client = AzureClientFactory.Create(envVars);
@@ -93,6 +97,7 @@ public class CreateVMHandler : IOperationHandler
             };
             vnetData.AddressPrefixes.Add("10.0.0.0/16");
             vnetData.Subnets.Add(new SubnetData { Name = "default", AddressPrefix = "10.0.0.0/24" });
+            tags.ApplyTo(vnetData.Tags);
 
             var vnetOp = await rgResource.GetVirtualNetworks()
                 .CreateOrUpdateAsync(global::Azure.WaitUntil.Completed, $"{vmName}-vnet", vnetData, ct);
@@ -102,6 +107,7 @@ public class CreateVMHandler : IOperationHandler
             // 2. Network Security Group
             _logger.LogInformation("Creating NSG {NSG} for VM {VM}", $"{vmName}-nsg", vmName);
             var nsgData = new NetworkSecurityGroupData { Location = azureLocation };
+            tags.ApplyTo(nsgData.Tags);
             var priority = 100;
             foreach (var port in openPorts)
             {
@@ -133,6 +139,7 @@ public class CreateVMHandler : IOperationHandler
                 Sku = new PublicIPAddressSku { Name = PublicIPAddressSkuName.Standard },
             };
 
+            tags.ApplyTo(ipData.Tags);
             var ipOp = await rgResource.GetPublicIPAddresses()
                 .CreateOrUpdateAsync(global::Azure.WaitUntil.Completed, $"{vmName}-ip", ipData, ct);
             var publicIp = ipOp.Value;
@@ -153,6 +160,7 @@ public class CreateVMHandler : IOperationHandler
                 PrivateIPAllocationMethod = NetworkIPAllocationMethod.Dynamic,
             });
 
+            tags.ApplyTo(nicData.Tags);
             var nicOp = await rgResource.GetNetworkInterfaces()
                 .CreateOrUpdateAsync(global::Azure.WaitUntil.Completed, $"{vmName}-nic", nicData, ct);
             var nic = nicOp.Value;
@@ -188,6 +196,7 @@ public class CreateVMHandler : IOperationHandler
                     },
                 },
             };
+            tags.ApplyTo(vmData.Tags);
             vmData.NetworkProfile = new VirtualMachineNetworkProfile();
             vmData.NetworkProfile.NetworkInterfaces.Add(
                 new VirtualMachineNetworkInterfaceReference { Id = nic.Id, Primary = true });

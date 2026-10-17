@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations.Common;
 using Azure.ResourceManager.Network;
 using Microsoft.Extensions.Logging;
 
@@ -60,6 +61,9 @@ public class CreateVirtualNetworkHandler : IOperationHandler
         }
         if (subnets.Count == 0) subnets.Add(("default", "10.0.0.0/24"));
 
+        if (!ResourceTags.TryBuild(envVars, parameters, DateTime.UtcNow, out var tags, out var tagError))
+            return new LayerExecutionResult(false, tagError!);
+
         try
         {
             var client = AzureClientFactory.Create(envVars);
@@ -74,6 +78,7 @@ public class CreateVirtualNetworkHandler : IOperationHandler
                 vnetData.AddressPrefixes.Add(cidr);
             foreach (var (name, cidr) in subnets)
                 vnetData.Subnets.Add(new SubnetData { Name = name, AddressPrefix = cidr });
+            tags.ApplyTo(vnetData.Tags);
 
             _logger.LogInformation(
                 "Creating VNet {VNet} in {ResourceGroup} ({Location}) with {SubnetCount} subnet(s)",

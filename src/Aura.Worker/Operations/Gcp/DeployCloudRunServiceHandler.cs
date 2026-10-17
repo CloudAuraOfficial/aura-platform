@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations.Common;
 using Google.Cloud.Run.V2;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
@@ -47,6 +48,9 @@ public class DeployCloudRunServiceHandler : IOperationHandler
         var projectId = GcpClientFactory.ResolveProjectId(envVars);
         var parent = $"projects/{projectId}/locations/{region}";
 
+        if (!ResourceTags.TryBuild(envVars, parameters, DateTime.UtcNow, out var tags, out var tagError))
+            return new LayerExecutionResult(false, tagError!);
+
         try
         {
             var client = GcpClientFactory.CreateCloudRunServices(envVars);
@@ -81,6 +85,7 @@ public class DeployCloudRunServiceHandler : IOperationHandler
                 },
                 Labels = { { "aura-layer", SanitizeLabel(layerName) }, { "aura-managed", "true" } },
             };
+            tags.ApplyTo(service.Labels);
 
             var fullName = $"{parent}/services/{serviceName}";
             bool exists;

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations.Common;
 using Google;
 using Google.Apis.Storage.v1.Data;
 using Microsoft.Extensions.Logging;
@@ -29,6 +30,9 @@ public class CreateGcsBucketHandler : IOperationHandler
         var uniformAccess = !parameters.TryGetProperty("uniformBucketLevelAccess", out var uaProp) || uaProp.GetBoolean();
         var projectId = GcpClientFactory.ResolveProjectId(envVars);
 
+        if (!ResourceTags.TryBuild(envVars, parameters, DateTime.UtcNow, out var tags, out var tagError))
+            return new LayerExecutionResult(false, tagError!);
+
         try
         {
             var client = GcpClientFactory.CreateStorage(envVars);
@@ -54,6 +58,7 @@ public class CreateGcsBucketHandler : IOperationHandler
                 },
             };
 
+            tags.ApplyTo(bucket.Labels);
             await client.CreateBucketAsync(projectId, bucket, cancellationToken: ct);
             return new LayerExecutionResult(true,
                 $"GCS bucket '{bucketName}' created in {location} (storageClass={storageClass}, versioning={versioning}, uniformAccess={uniformAccess}).");

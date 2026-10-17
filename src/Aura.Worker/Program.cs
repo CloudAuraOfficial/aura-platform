@@ -4,6 +4,8 @@ using Aura.Infrastructure.Data;
 using Aura.Infrastructure.Services;
 using Aura.Worker.Executors;
 using Aura.Worker.Operations;
+using Aura.Worker.Reaper;
+using Aura.Worker.Reaper.Providers;
 using Aura.Worker.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -112,6 +114,13 @@ builder.ConfigureServices((context, services) =>
     // Background services
     services.AddHostedService<RunWorkerService>();
     services.AddHostedService<DeploymentSchedulerService>();
+
+    // Expiry reaper (#53): off unless REAPER_ENABLED=true, dry-run unless REAPER_DRY_RUN=false
+    services.AddSingleton(ReaperOptions.FromEnvironment());
+    services.AddSingleton<IProviderResourceReaper, AzureResourceReaper>();
+    services.AddSingleton<IProviderResourceReaper, AwsResourceReaper>();
+    services.AddSingleton<IProviderResourceReaper, GcpResourceReaper>();
+    services.AddHostedService<ResourceReaperService>();
 });
 
 var host = builder.Build();

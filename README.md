@@ -183,6 +183,9 @@ All configuration is via environment variables (`.env` file).
 | `WORKER_CONCURRENCY` | Max concurrent deployment runs | No | `5` |
 | `RUN_STALE_THRESHOLD_SECONDS` | Stuck-run reaper timeout | No | `7200` |
 | `SCHEDULER_POLL_SECONDS` | Cron scheduler poll interval | No | `30` |
+| `REAPER_ENABLED` | Turn on the expiry reaper for `aura-expires-at`-tagged cloud resources (#53) | No | `false` |
+| `REAPER_DRY_RUN` | When the reaper is enabled: log what would be deleted, delete nothing. Only `false` allows deletes | No | `true` |
+| `REAPER_INTERVAL_SECONDS` | Reaper sweep interval (minimum 60) | No | `900` |
 | `CORS_ORIGINS` | Comma-separated allowed origins | No | any |
 | `ASPNETCORE_ENVIRONMENT` | Runtime environment | No | `Production` |
 

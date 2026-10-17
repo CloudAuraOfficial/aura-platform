@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations.Common;
 using Azure.ResourceManager.Resources;
 using Microsoft.Extensions.Logging;
 
@@ -27,6 +28,9 @@ public class CreateResourceGroupHandler : IOperationHandler
         var resourceGroupName = rgNameProp.GetString()!;
         var location = locationProp.GetString()!;
 
+        if (!ResourceTags.TryBuild(envVars, parameters, DateTime.UtcNow, out var tags, out var tagError))
+            return new LayerExecutionResult(false, tagError!);
+
         try
         {
             var client = AzureClientFactory.Create(envVars);
@@ -34,6 +38,7 @@ public class CreateResourceGroupHandler : IOperationHandler
             var rgCollection = subscription.GetResourceGroups();
 
             var rgData = new ResourceGroupData(new global::Azure.Core.AzureLocation(location));
+            tags.ApplyTo(rgData.Tags);
 
             _logger.LogInformation(
                 "Creating resource group {ResourceGroup} in {Location}",

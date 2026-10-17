@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Aura.Worker.Executors;
+using Aura.Worker.Operations.Common;
 using Google.Cloud.Compute.V1;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
@@ -48,6 +49,9 @@ public class CreateGceInstanceHandler : IOperationHandler
         var region = ZoneToRegion(zone);
         var subnetUri = $"projects/{projectId}/regions/{region}/subnetworks/{networkName}-subnet";
 
+        if (!ResourceTags.TryBuild(envVars, parameters, DateTime.UtcNow, out var tags, out var tagError))
+            return new LayerExecutionResult(false, tagError!);
+
         try
         {
             var instancesClient = GcpClientFactory.CreateInstances(envVars);
@@ -86,6 +90,7 @@ public class CreateGceInstanceHandler : IOperationHandler
                 },
             };
 
+            tags.ApplyTo(instance.Labels);
             _logger.LogInformation("Launching GCE {InstanceName} ({MachineType}) in {Zone}", instanceName, machineType, zone);
             var op = await instancesClient.InsertAsync(projectId, zone, instance, ct);
             await op.PollUntilCompletedAsync();
